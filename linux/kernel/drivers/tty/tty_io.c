@@ -1999,10 +1999,8 @@ static int tty_open(struct inode *inode, struct file *filp)
 
 retry_open:
 	retval = tty_alloc_file(filp);
-	if (retval) {
-		printk("tty_open: return -ENOMEM \n");/*ASUS-BBSP Debug Log for BZ6039+*/
+	if (retval)
 		return -ENOMEM;
-	}
 
 	noctty = filp->f_flags & O_NOCTTY;
 	index  = -1;
@@ -2071,7 +2069,6 @@ retry_open:
 		printk(KERN_DEBUG "%s: error %d in opening %s...\n", __func__,
 				retval, tty->name);
 #endif
-		printk("tty_open: error %d in opening %s...\n", retval, tty->name);/*ASUS-BBSP Debug Log for BZ6039+*/
 		tty_unlock(tty); /* need to call tty_release without BTM */
 		tty_release(inode, filp);
 		if (retval != -ERESTARTSYS)
@@ -2569,9 +2566,6 @@ static int tiocsetd(struct tty_struct *tty, int __user *p)
 	if (get_user(ldisc, p))
 		return -EFAULT;
 
-	if (!strcmp("ttyIFX0", tty->name))
-	printk("[tty %s] tiocsetd\n", tty->name);/*ASUS-BBSP Add debug msg for cfg cmux fail+*/
-
 	ret = tty_set_ldisc(tty, ldisc);
 
 	return ret;
@@ -2732,9 +2726,6 @@ long tty_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 	real_tty = tty_pair_get_tty(tty);
 
-	if (!strcmp("ttyIFX0", real_tty->name))
-	printk("[tty %s] tty_ioctl, cmd = %d\n", real_tty->name, cmd);/*ASUS-BBSP Add debug msg for cfg cmux fail+*/
-
 	/*
 	 * Factor out some common prep work
 	 */
@@ -2748,19 +2739,12 @@ long tty_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		if (retval)
 			return retval;
 		if (cmd != TIOCCBRK) {
-
-		if (!strcmp("ttyIFX0", real_tty->name))
-		printk("[tty %s] tty_ioctl, tty_wait_until_sent\n", real_tty->name);/*ASUS-BBSP Add debug msg for cfg cmux fail+*/
-
 			tty_wait_until_sent(tty, 0);
 			if (signal_pending(current))
 				return -EINTR;
 		}
 		break;
 	}
-
-	if (!strcmp("ttyIFX0", real_tty->name))
-	printk("[tty %s] tty_ioctl, do the stuff\n", real_tty->name);/*ASUS-BBSP Add debug msg for cfg cmux fail+*/
 
 	/*
 	 *	Now do the stuff.
@@ -2801,16 +2785,8 @@ long tty_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	case TIOCGSID:
 		return tiocgsid(tty, real_tty, p);
 	case TIOCGETD:
-
-		if (!strcmp("ttyIFX0", real_tty->name))
-		printk("[tty %s] tty_ioctl, put_user +\n", real_tty->name);/*ASUS-BBSP Add debug msg for cfg cmux fail+*/
-
 		return put_user(tty->ldisc->ops->num, (int __user *)p);
 	case TIOCSETD:
-
-		if (!strcmp("ttyIFX0", real_tty->name))
-		printk("[tty %s] tty_ioctl, tiocsetd +\n", real_tty->name);/*ASUS-BBSP Add debug msg for cfg cmux fail+*/
-
 		return tiocsetd(tty, p);
 	case TIOCVHANGUP:
 		if (!capable(CAP_SYS_ADMIN))

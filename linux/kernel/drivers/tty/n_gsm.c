@@ -2842,8 +2842,6 @@ static int gsmld_ioctl(struct tty_struct *tty, struct file *file,
 	struct gsm_config c;
 	struct gsm_mux *gsm = tty->disc_data;
 
-	printk("[tty %s] gsmld_ioctl\n", tty->name);/*ASUS-BBSP Add debug msg for cfg cmux fail+*/
-
 	switch (cmd) {
 	case GSMIOC_GETCONF:
 		memset(&c, 0, sizeof(c));
@@ -2859,9 +2857,6 @@ static int gsmld_ioctl(struct tty_struct *tty, struct file *file,
 		else
 			c.i = 2;
 		pr_debug("Ftype %d i %d\n", gsm->ftype, c.i);
-
-		printk("[tty %s] gsmld_ioctl:Ftype %d i $d\n", tty->name, gsm->ftype, c.i);/*ASUS-BBSP Add debug msg for cfg cmux fail+*/
-
 		c.mru = gsm->mru;
 		c.mtu = gsm->mtu;
 		c.clocal = gsm->clocal;
@@ -3288,7 +3283,6 @@ static int gsmtty_open(struct tty_struct *tty, struct file *filp)
 	struct gsm_mux *gsm = dlci->gsm;
 	struct ktermios save;
 	int t;
-	printk("gsmtty_open: dlci state %d \n", dlci->state);/*ASUS-BBSP Debug Log for BZ6039+*/
 
 	if (dlci->state == DLCI_CLOSING) {
 		/* if we are in blocking mode, wait the end of the closing */
@@ -3298,10 +3292,8 @@ static int gsmtty_open(struct tty_struct *tty, struct file *filp)
 					gsm->n2 * gsm->t1 * HZ / 100);
 			if (!t)
 				return -ENXIO;
-		} else {
-			printk("gsmtty_open: return -EAGAIN \n");/*ASUS-BBSP Debug Log for BZ6039+*/
+		} else
 			return -EAGAIN;
-		}
 	}
 	port->count++;
 	tty_port_tty_set(port, tty);
@@ -3321,7 +3313,6 @@ static int gsmtty_open(struct tty_struct *tty, struct file *filp)
 	/* We could in theory open and close before we wait - eg if we get
 	   a DM straight back. This is ok as that will have caused a hangup */
 	set_bit(ASYNCB_INITIALIZED, &port->flags);
-	printk("Start sending SABM messages addr= %d\n", dlci->addr);/*ASUS-BBSP Debug Log for BZ6039+*/
 	/* Start sending off SABM messages */
 	gsm_dlci_begin_open(dlci);
 

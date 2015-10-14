@@ -5,7 +5,7 @@
 #define HW_ID_ER			0x00000002
 #define HW_ID_PR			0x00000003
 #define HW_ID_MP			0x00000004
-#define HW_ID_MP2			0x00000007
+#define HW_ID_TR			0x00000005
 #define HW_ID_ER2			0x00000009 /* There is no ER2, just for compiling successfully */
 
 #elif defined(CONFIG_PF450CL)

@@ -144,11 +144,19 @@ u8 FTS_gesture_register_d2;
 u8 FTS_gesture_register_d5;
 u8 FTS_gesture_register_d6;
 u8 FTS_gesture_register_d7;
+
+u8 key_record;
 /* +++ asus jacob add for print touch location +++ */
 int report_touch_locatoin_count[10];
 /* --- asus jacob add for print touch location --- */
 extern int Read_HW_ID(void);
+/* +++ asus jacob add for check proximity status +++ */
+bool EnableProximityCheck = true;
+/* --- asus jacob add for check proximity status --- */
 
+/* +++ asus jacob add for get audio status +++ */
+extern int get_audiomode(void);
+/* --- asus jacob add for get audio status --- */
 static void ftxxxx_ts_suspend(struct early_suspend *handler);
 static void ftxxxx_ts_resume(struct early_suspend *handler);
 #ifdef CONFIG_HAS_EARLYSUSPEND
@@ -176,6 +184,7 @@ static int IICErrorCountor;
 #define FTXXXX_RESET_PIN_NAME	"ft3417-rst"
 /*#define FTXXXX_INT_PIN	62//EXYNOS4_GPJ0(3) //S5PV210_GPB(2)*/
 #define FTXXXX_INT_PIN_NAME	"ft3417-int"
+extern bool proximity_check_status(void);
 
 /*
 *ftxxxx_i2c_Read-read data and write data by i2c
@@ -376,9 +385,14 @@ static ssize_t focal_show_tpfwver(struct switch_dev *sdev, char *buf)
 #ifdef FTS_GESTRUE/*zax 20140922*/
 static void check_gesture(struct ftxxxx_ts_data *data, int gesture_id)
 {
+	bool Ps_status = false;
 
 	printk("[Focal][Touch] %s :  gesture_id = 0x%x\n ", __func__, gesture_id);
 
+	if (EnableProximityCheck && !(get_audiomode() == 2))
+		Ps_status = proximity_check_status();
+
+	if (!Ps_status) {
 	switch (gesture_id) {
 	/* ++++ touch gesture mode support part in ZE500CL ++++ */
 	case GESTURE_DOUBLECLICK:
@@ -485,8 +499,10 @@ static void check_gesture(struct ftxxxx_ts_data *data, int gesture_id)
 
 		break;
 
+		}
+	} else {
+		printk("[Focal][Touch] %s :  Skip wake up devices !\n ", __func__);
 	}
-
 }
 
 
@@ -686,13 +702,16 @@ static void ftxxxx_report_value(struct ftxxxx_ts_data *data)
 			if ((event->au16_y[i] > 2480) & (event->au16_y[i] < 2520)) {
 				if ((event->au16_x[i] > 140) & (event->au16_x[i] < 180)) {
 					input_report_key(data->input_dev, KEY_BACK, 1);
-					focal_debug(DEBUG_VERBOSE, "[Focal][Touch][KEY] id=%d BACK KEY Press ! \n", event->au8_finger_id[i]);
+					key_record |= 1;
+					focal_debug(DEBUG_VERBOSE, "[Focal][Touch][KEY] id=%d BACK KEY Press, key record = %d ! \n", event->au8_finger_id[i], key_record);
 				} else if ((event->au16_x[i] > 340) & (event->au16_x[i] < 380)) {
 					input_report_key(data->input_dev, KEY_HOME, 1);
-					focal_debug(DEBUG_VERBOSE, "[Focal][Touch][KEY] id=%d HOME KEY Press ! \n", event->au8_finger_id[i]);
+					key_record |= 1 << 1;
+					focal_debug(DEBUG_VERBOSE, "[Focal][Touch][KEY] id=%d HOME KEY Press, key record = %d ! \n", event->au8_finger_id[i], key_record);
 				} else if ((event->au16_x[i] > 540) & (event->au16_x[i] < 580)) {
 					input_report_key(data->input_dev, KEY_MENU, 1);
-					focal_debug(DEBUG_VERBOSE, "[Focal][Touch][KEY] id=%d MENU KEY Press ! \n", event->au8_finger_id[i]);
+					key_record |= 1 << 2;
+					focal_debug(DEBUG_VERBOSE, "[Focal][Touch][KEY] id=%d MENU KEY Press, key record = %d ! \n", event->au8_finger_id[i], key_record);
 				}
 			} else {
 				input_report_key(data->input_dev, BTN_TOUCH, 1);             /* touch down*/
@@ -716,12 +735,15 @@ static void ftxxxx_report_value(struct ftxxxx_ts_data *data)
 			if ((event->au16_y[i] > 2480) & (event->au16_y[i] < 2520)) {
 				if ((event->au16_x[i] > 140) & (event->au16_x[i] < 180)) {
 					input_report_key(data->input_dev, KEY_BACK, 0);
+					key_record &= 0xfe;
 					focal_debug(DEBUG_VERBOSE, "[Focal][Touch][KEY] id=%d BACK KEY Up ! \n", event->au8_finger_id[i]);
 				} else if ((event->au16_x[i] > 340) & (event->au16_x[i] < 380)) {
 					input_report_key(data->input_dev, KEY_HOME, 0);
+					key_record &= 0xfd;
 					focal_debug(DEBUG_VERBOSE, "[Focal][Touch][KEY] id=%d HOME KEY Up ! \n", event->au8_finger_id[i]);
 				} else if ((event->au16_x[i] > 540) & (event->au16_x[i] < 580)) {
 					input_report_key(data->input_dev, KEY_MENU, 0);
+					key_record &= 0xfb;
 					focal_debug(DEBUG_VERBOSE, "[Focal][Touch][KEY] id=%d MENU KEY Up ! \n", event->au8_finger_id[i]);
 				}
 			}
@@ -735,6 +757,18 @@ static void ftxxxx_report_value(struct ftxxxx_ts_data *data)
 
 	if(event->touch_point == uppoint) {
 		input_report_key(data->input_dev, BTN_TOUCH, 0);
+		if (key_record) {
+			if (key_record & 0x1) {
+				input_report_key(data->input_dev, KEY_BACK, 0);
+			}
+			if (key_record & 0x2) {
+				input_report_key(data->input_dev, KEY_HOME, 0);
+			}
+			if (key_record & 0x4) {
+				input_report_key(data->input_dev, KEY_MENU, 0);
+			}
+		}
+		key_record = 0;
 		touch_down_up_status = 0;
 		/* +++ asus jacob add for print touch location +++ */
 		memset(report_touch_locatoin_count, 0, sizeof(report_touch_locatoin_count));
@@ -1738,6 +1772,7 @@ static void ftxxxx_ts_suspend(struct early_suspend *handler)
 			if (ftxxxx_ts->dclick_mode_eable == 1) {
 				printk("[Focal][Touch] %s : open dclick mode \n", __func__);
 				ftxxxx_write_reg(ts->client, 0xd1, 0x10);
+				ftxxxx_write_reg(ts->client, 0xe2, 0x19);
 			}
 
 			if (ftxxxx_ts->gesture_mode_eable == 1) {
@@ -1790,6 +1825,20 @@ static void ftxxxx_ts_suspend(struct early_suspend *handler)
 
 	input_report_key(ftxxxx_ts->input_dev, BTN_TOUCH, 0);
 	input_mt_sync(ftxxxx_ts->input_dev);
+
+	if (key_record) {
+		if (key_record & 0x1) {
+			input_report_key(ftxxxx_ts->input_dev, KEY_BACK, 0);
+		}
+		if (key_record & 0x2) {
+			input_report_key(ftxxxx_ts->input_dev, KEY_HOME, 0);
+		}
+		if (key_record & 0x4) {
+			input_report_key(ftxxxx_ts->input_dev, KEY_MENU, 0);
+		}
+	}
+	key_record = 0;
+	touch_down_up_status = 0;
 	input_sync(ftxxxx_ts->input_dev);
 
 	ftxxxx_ts->suspend_flag = 1;

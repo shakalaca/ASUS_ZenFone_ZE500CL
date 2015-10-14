@@ -841,6 +841,44 @@ irqreturn_t IRsensor_irq_handler(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
+/* || For Proximity check status || */
+
+bool proximity_check_status(void)
+{
+	int adc_value = 0;
+	bool status = false;	
+
+	/* check probe status */
+	if(ASUS_IR_SENSOR_PROBE == false)
+		return status;
+
+	mutex_lock(&g_ir_lock);
+	
+	if (!g_ps_data->HAL_switch_on) {
+		proximity_turn_onoff(true);
+	}
+	
+	msleep(50);
+
+	adc_value = IRsensor_hw_client->proximity_hw_get_adc();
+
+	if (adc_value >= g_ps_data->g_ps_threshold_hi) {
+		status = true;
+	}else{ 
+		status = false;
+	}
+	log("proximity_check_status : %s", status?"Close":"Away");
+	
+	if (!g_ps_data->HAL_switch_on) {
+		proximity_turn_onoff(false);
+	}
+	mutex_unlock(&g_ir_lock);
+
+	return status;
+}
+
+EXPORT_SYMBOL(proximity_check_status);
+
 /*====================
  *|| Initialization Part ||
  *====================

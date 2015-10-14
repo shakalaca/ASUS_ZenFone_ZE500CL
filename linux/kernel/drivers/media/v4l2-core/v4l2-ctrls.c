@@ -706,6 +706,7 @@ const char *v4l2_ctrl_get_name(u32 id)
 	case V4L2_CID_EXPOSURE_AUTO:		return "Auto Exposure";
 	case V4L2_CID_HILIGHT_MODE:	return "Hilight mode, Charge binning";/*ASUS_BSP PJ "add lowlight mode control binning weight interface"*/
 	case V4L2_CID_SET_DPC:	return "DPC  Controls";/*ASUS_BSP PJ "add control DPC interface"*/
+	case V4L2_CID_SET_DRAKMODE:	return "Dark Mode  Controls";/*ASUS_BSP ZZ "Implement dark mode"*/
 	case V4L2_CID_EXPOSURE_ABSOLUTE:	return "Exposure Time, Absolute";
 	case V4L2_CID_EXPOSURE_AUTO_PRIORITY:	return "Exposure, Dynamic Framerate";
 	case V4L2_CID_PAN_RELATIVE:		return "Pan, Relative";

@@ -569,13 +569,13 @@ static void asus_otg_early_suspend_delay_work(struct work_struct *w)
 		g_keep_power_on = asus_otg_keep_power_on_check();
 		dev_info(pnw->dev, "g_keep_power_on (%d)\n", g_keep_power_on);
 
-		if (!g_keep_power_on)
+		if (!g_keep_power_on) {
 			asus_otg_host_auto_switch(HOST_AUTO_NONE);
+			/* Wait for the work in hub thread for device removal */
+			wake_lock_timeout(&early_suspend_work_wlock, 2 * HZ);
+			wake_unlock(&early_suspend_wlock);
+		}
 	}
-
-	/* Wait for the work in hub thread for device removal */
-	wake_lock_timeout(&early_suspend_work_wlock, 2 * HZ);
-	wake_unlock(&early_suspend_wlock);
 
 	dev_info(pnw->dev, "%s()---(%d)(%d)\n", __func__, g_keep_power_on, g_suspend_delay_work_run);
 }
@@ -607,8 +607,8 @@ static void asus_otg_early_suspend(struct early_suspend *h)
 	wake_unlock(&early_suspend_wlock);
 
 	if (pnw->host_mode) {
-		queue_delayed_work(early_suspend_delay_wq, &early_suspend_delay_work, 4 * HZ);
 		wake_lock(&early_suspend_wlock);
+		queue_delayed_work(early_suspend_delay_wq, &early_suspend_delay_work, 4 * HZ);
 	}
 
 	dev_info(pnw->dev, "%s()---\n", __func__);

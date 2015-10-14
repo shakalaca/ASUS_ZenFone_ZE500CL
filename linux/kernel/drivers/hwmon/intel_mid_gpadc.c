@@ -648,7 +648,7 @@ EXPORT_SYMBOL(intel_mid_gpadc_sample);
  */
 int get_gpadc_sample(void *handle, int sample_count, int *buffer)
 {
-
+	printk("get_gpadc_sample start!\n");
 	struct gpadc_request *rq = handle;
 	struct gpadc_info *mgi = &gpadc_info;
 	int i;
@@ -670,10 +670,12 @@ int get_gpadc_sample(void *handle, int sample_count, int *buffer)
 			PM_QOS_CPU_DMA_LATENCY,	CSTATE_EXIT_LATENCY_S0i1-1);
 	gpadc_poweron(mgi, rq->vref);
 	/*turn off ADC8 if not called from headset ++++++*/
+	/*
 	if (called_from_headset)
 		gpadc_write(ADC1ADDR0+4, 8 | MSIC_STOPCH);
 	else
 		gpadc_write(ADC1ADDR0+4, MSIC_STOPCH);
+	*/
 	/*turn off ADC8 if not called from headset ------*/
 	gpadc_clear_bits(ADC1CNTL1, ADC1CNTL1_AD1OFFSETEN);
 	gpadc_read(ADC1CNTL1, &data);
@@ -689,20 +691,37 @@ int get_gpadc_sample(void *handle, int sample_count, int *buffer)
 			goto fail;
 		}
 		gpadc_set_bits(ADC1CNTL3, ADC1CNTL3_RRDATARD);
-		for (i = 0; i < rq->count; ++i) {
-			if (!called_from_headset && ((rq->ch[i] & 0xf) == 0x08)) /*channel 8 for headset button*/
-				continue;
-			tmp = 0;
-			gpadc_read(ADC1SNS0H + 2 * rq->addr[i], &data);
-			tmp += data << 2;
-			gpadc_read(ADC1SNS0H + 2 * rq->addr[i] + 1, &data);
-			tmp += data & 0x3;
+		if (called_from_headset) {
+				i = 4; /*force to read GPADC8*/
+				printk("call from headset \n");
+				tmp = 0;
+				gpadc_read(ADC1SNS0H + 2 * rq->addr[i], &data);
+				tmp += data << 2;
+				gpadc_read(ADC1SNS0H + 2 * rq->addr[i] + 1, &data);
+				tmp += data & 0x3;
 
-			if (rq->ch[i] & CH_NEED_VCALIB)
-				tmp = gpadc_calib(tmp, mgi->vzse, mgi->vge);
-			if (rq->ch[i] & CH_NEED_ICALIB)
-				tmp = gpadc_calib(tmp, mgi->izse, mgi->ige);
-			buffer[i] += tmp;
+				if (rq->ch[i] & CH_NEED_VCALIB)
+					tmp = gpadc_calib(tmp, mgi->vzse, mgi->vge);
+				if (rq->ch[i] & CH_NEED_ICALIB)
+					tmp = gpadc_calib(tmp, mgi->izse, mgi->ige);
+				buffer[i] += tmp;
+		} else {
+			for (i = 0; i < rq->count; ++i) {
+				if (((rq->ch[i] & 0xf) == 0x08)) /*channel 8 for headset button*/
+					continue;
+				printk("rq->count = %d , i = %d\n", rq->count , i);
+				tmp = 0;
+				gpadc_read(ADC1SNS0H + 2 * rq->addr[i], &data);
+				tmp += data << 2;
+				gpadc_read(ADC1SNS0H + 2 * rq->addr[i] + 1, &data);
+				tmp += data & 0x3;
+
+				if (rq->ch[i] & CH_NEED_VCALIB)
+					tmp = gpadc_calib(tmp, mgi->vzse, mgi->vge);
+				if (rq->ch[i] & CH_NEED_ICALIB)
+					tmp = gpadc_calib(tmp, mgi->izse, mgi->ige);
+				buffer[i] += tmp;
+			}
 		}
 		gpadc_clear_bits(ADC1CNTL3, ADC1CNTL3_RRDATARD);
 		mgi->rnd_done = 0;
@@ -720,6 +739,7 @@ fail:
 		ret = mgi->pmic_ipc_status;
 	}
 	mutex_unlock(&mgi->lock);
+	printk("get_gpadc_sample endt!\n");
 	return ret;
 }
 EXPORT_SYMBOL(get_gpadc_sample);

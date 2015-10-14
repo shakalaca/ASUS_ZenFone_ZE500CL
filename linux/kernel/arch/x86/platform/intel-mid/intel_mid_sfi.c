@@ -738,9 +738,13 @@ static int __init sfi_parse_oemr(struct sfi_table_header *table)
 			pr_info("Hardware VERSION = MP\n");
 			break;
 
+		case HW_ID_TR:
+			pr_info("Hardware VERSION = TR\n");
+			break;
+
 		default:
-			HARDWARE_ID = HW_ID_PR;
-			pr_info("default Hardware VERSION = PR\n");
+			HARDWARE_ID = HW_ID_MP;
+			pr_info("default Hardware VERSION = MP\n");
 			break;
 		}
 		/* HARDWARE_ID = HW_ID_EVB; */

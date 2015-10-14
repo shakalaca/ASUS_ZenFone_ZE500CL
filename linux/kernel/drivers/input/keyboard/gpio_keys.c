@@ -30,6 +30,10 @@
 #include <linux/of_gpio.h>
 #include <linux/spinlock.h>
 
+#include <linux/wakelock.h>
+static bool g_bResume = 1;
+static struct wake_lock pwr_key_wake_lock;
+
 struct gpio_keys_drvdata;
 struct gpio_button_data {
 	struct gpio_keys_drvdata *ddata;
@@ -419,6 +423,13 @@ static void gpio_keys_gpio_report_event(struct gpio_button_data *bdata)
 		if (state)
 			input_event(input, type, button->code, button->value);
 	} else {
+		if (state) {
+			if ((button->code == KEY_VOLUMEUP) || (button->code == KEY_VOLUMEDOWN)) {
+				printk("[Gpio_keys]vol_key:%x,pm sts:%x,\r\n", state, g_bResume);
+				wake_lock_timeout(&pwr_key_wake_lock, 3 * HZ);
+				printk("[Gpio_keys]Wakelock 3 sec for vol_key \n");
+			}
+		}
 		input_event(input, type, button->code, !!state);
 	}
 	input_sync(input);
@@ -461,6 +472,7 @@ static irqreturn_t gpio_keys_gpio_isr(int irq, void *dev_id)
 		bdata->ddata->force_trigger = 0;
 	}
 
+	bdata->timer_debounce = 10;
 	if (bdata->timer_debounce)
 		mod_timer(&bdata->timer,
 			jiffies + msecs_to_jiffies(bdata->timer_debounce));
@@ -799,7 +811,7 @@ static int gpio_keys_probe(struct platform_device *pdev)
 		__set_bit(EV_REP, input->evbit);
 
 	for (i = 0; i < pdata->nbuttons; i++) {
-		const struct gpio_keys_button *button = &pdata->buttons[i];
+		struct gpio_keys_button *button = &pdata->buttons[i];
 		struct gpio_button_data *bdata = &ddata->data[i];
 
 		bdata->ddata = ddata;
@@ -837,6 +849,9 @@ static int gpio_keys_probe(struct platform_device *pdev)
 	input_sync(input);
 
 	device_init_wakeup(&pdev->dev, wakeup);
+
+	wake_lock_init(&pwr_key_wake_lock, WAKE_LOCK_SUSPEND, "pwr_key_lock");
+	printk(KERN_INFO "[Gpio_keys]Initialize a wakelock for gpio_key\r\n");
 
 	printk("[Progress][Gpio_keys] Probe ends\n");
 	return 0;
@@ -896,8 +911,8 @@ static int gpio_keys_suspend(struct device *dev)
 		struct gpio_button_data *bdata = &ddata->data[i];
 		if (bdata->button->wakeup && device_may_wakeup(dev))
 			enable_irq_wake(bdata->irq);
-		else if (gpio_is_valid(bdata->button->gpio))
-			free_irq(bdata->irq, bdata);
+		/*else if (gpio_is_valid(bdata->button->gpio))
+			free_irq(bdata->irq, bdata);*/
 	}
 
 	return 0;
@@ -940,18 +955,31 @@ static int gpio_keys_resume(struct device *dev)
 	return 0;
 }
 
+static int gpio_keys_suspend_noirq(struct device *dev)
+{
+
+       g_bResume = 0;
+       printk("[Gpio_keys]gpio_keys_suspend_noirq\n");
+
+       return 0;
+}
+
 static int gpio_keys_resume_noirq(struct device *dev)
 {
 	struct gpio_keys_drvdata *ddata = dev_get_drvdata(dev);
 
 	ddata->force_trigger = 1;
+	g_bResume = 1;
+	printk("[Gpio_keys]gpio_keys_resume_noirq\n");
+
 	return 0;
 }
 
 static const struct dev_pm_ops gpio_keys_pm_ops = {
 	.suspend	= gpio_keys_suspend,
 	.resume		= gpio_keys_resume,
-	.resume_noirq	= gpio_keys_resume_noirq,
+	.suspend_noirq  = gpio_keys_suspend_noirq,
+	.resume_noirq   = gpio_keys_resume_noirq,
 };
 #endif
 

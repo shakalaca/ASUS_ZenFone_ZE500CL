@@ -695,6 +695,8 @@ enum v4l2_scene_mode {
 #define V4L2_CID_AUTO_FOCUS_RANGE		(V4L2_CID_CAMERA_CLASS_BASE+31)
 #define V4L2_CID_HILIGHT_MODE		(V4L2_CID_CAMERA_CLASS_BASE+32)/*ASUS_BSP PJ "add lowlight mode control binning weight interface"*/
 #define V4L2_CID_SET_DPC		(V4L2_CID_CAMERA_CLASS_BASE+33)/*ASUS_BSP PJ "add control DPC interface"*/
+#define V4L2_CID_SET_DRAKMODE		(V4L2_CID_CAMERA_CLASS_BASE+34)/*ASUS_BSP ZZ "Implement dark mode"*/
+
 enum v4l2_auto_focus_range {
 	V4L2_AUTO_FOCUS_RANGE_AUTO		= 0,
 	V4L2_AUTO_FOCUS_RANGE_NORMAL		= 1,

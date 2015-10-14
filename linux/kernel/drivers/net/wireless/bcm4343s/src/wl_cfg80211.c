@@ -2014,7 +2014,9 @@ static s32 wl_cfg80211_handle_ifdel(struct bcm_cfg80211 *cfg, wl_if_event_info *
 {
 	s32 type = -1;
 	s32 bssidx = -1;
-#ifdef PROP_TXSTATUS_VSDB
+/* ASUS_BSP+++ "Fix disconnect wfd by turn off wifi causing DUT unable to connect to AP issue" */
+#if defined (PROP_TXSTATUS_VSDB) || (PROP_TXSTATUS)
+/* ASUS_BSP--- "Fix disconnect wfd by turn off wifi causing DUT unable to connect to AP issue" */
 #if defined(BCMSDIO)
 	dhd_pub_t *dhd =  (dhd_pub_t *)(cfg->pub);
 	bool enabled;
@@ -2056,6 +2058,17 @@ static s32 wl_cfg80211_handle_ifdel(struct bcm_cfg80211 *cfg, wl_if_event_info *
 		}
 #endif 
 #endif /* PROP_TXSTATUS_VSDB */
+
+/* ASUS_BSP+++ "Fix disconnect wfd by turn off wifi causing DUT unable to connect to AP issue" */
+#ifdef PROP_TXSTATUS
+		dhd_wlfc_get_enable(dhd, &enabled);
+		if (enabled && !wl_get_drv_status(cfg, CONNECTED, bcmcfg_to_prmry_ndev(cfg))) {
+			WL_ERR(("[WDBG] Reinit dhd before remove_if in ifdel while miracast is connected\n"));
+			dhd_wlfc_deinit(dhd);
+			dhd_wlfc_init(dhd);
+		}
+#endif /* PROP_TXSTATUS */
+/* ASUS_BSP--- "Fix disconnect wfd by turn off wifi causing DUT unable to connect to AP issue" */
 	}
 
 	wl_cfg80211_remove_if(cfg, if_event_info->ifidx, ndev);
@@ -8307,9 +8320,9 @@ fail:
 #endif /* LINUX_VERSION < VERSION(3,4,0) || WL_COMPAT_WIRELESS */
 
 #ifdef WL_SCHED_SCAN
-#define PNO_TIME		30
-#define PNO_REPEAT		4
-#define PNO_FREQ_EXPO_MAX	2
+#define PNO_TIME		300
+#define PNO_REPEAT		0
+#define PNO_FREQ_EXPO_MAX	0
 static int
 wl_cfg80211_sched_scan_start(struct wiphy *wiphy,
                              struct net_device *dev,

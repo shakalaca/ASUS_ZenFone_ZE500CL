@@ -641,6 +641,14 @@ int ctp_soc_jack_gpio_detect_bp(void)
 	pr_debug("ctp_common:%s\n", __func__);
 	status = ctx->ops->bp_detection(codec, jack, 0);
 
+
+	switch (status) {
+	case 0x1: /*button pressed*/
+		ctx->btn_press_flag = true;
+		atomic_inc(&ctx->bpirq_flag);
+		pr_debug("ctp_common Jack Report Button Press: 0x%x , 0x%x\n", jack->status, button_type);
+		/*ret = jack->status | SND_JACK_BTN_0;*/
+
 	if (ctp_HW_ID <= HW_ID_SR1) {
 		/*+++ ASUS_BSP : Eric +++ */
 		switch (rt5647->btn_type) {
@@ -660,16 +668,16 @@ int ctp_soc_jack_gpio_detect_bp(void)
 		}
 	} else {
 		/*+++ ASUS_BSP : Eric +++ */
-		button_type = ASUS_GET_BUTTON_TYPE();
-		/*--- ASUS_BSP : Eric --- */
+		switch (rt5647->btn_type) {
+		case 0x0400: /* center */
+				button_type = SND_JACK_BTN_0;
+				break;
+		default:
+				button_type = ASUS_GET_BUTTON_TYPE();
+				break;
+		}
 	}
 	/*--- ASUS_BSP : Eric +++ */
-	switch (status) {
-	case 0x1: /*button pressed*/
-		ctx->btn_press_flag = true;
-		atomic_inc(&ctx->bpirq_flag);
-		pr_debug("ctp_common Jack Report Button Press: 0x%x , 0x%x\n", jack->status, button_type);
-		/*ret = jack->status | SND_JACK_BTN_0;*/
 		ret = button_type | SND_JACK_HEADSET;
 		break;
 	case 0x2: /*button release*/
@@ -677,6 +685,7 @@ int ctp_soc_jack_gpio_detect_bp(void)
 		atomic_inc(&ctx->bpirq_flag);
 		pr_debug("ctp_common Jack Report Button Release: 0x%x , 0x%x\n", jack->status, button_type);
 		/*ret = jack->status & ~SND_JACK_BTN_0;*/
+		button_type = 0x0;
 		ret = button_type | SND_JACK_HEADSET;
 		break;
 	case 0x4: /*jack plug in*/

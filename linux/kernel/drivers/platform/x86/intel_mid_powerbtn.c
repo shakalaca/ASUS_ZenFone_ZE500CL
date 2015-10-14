@@ -56,6 +56,7 @@ static inline int pb_clear_bits(u16 addr, u8 mask)
 	return intel_scu_ipc_update_register(addr, 0, mask);
 }
 
+
 /* ASUS BSP Austin_T : time of long pressing power key +++ */
 #define TIMEOUT_COUNT 55
 static struct work_struct __power_key_pressing_work;
@@ -81,11 +82,16 @@ void power_key_pressing_work(struct work_struct *work)
 }
 /* ASUS BSP Austin_T : time of long pressing power key --- */
 
+int g_keycheck_abort;
+
+
 static irqreturn_t mid_pb_isr(int irq, void *dev_id)
 {
 	struct mid_pb_priv *priv = dev_id;
 	u8 pbstat;
 	/*bool bPowerKeyState;    ASUS BSP Austin_T +++ add debug msg */
+
+	g_keycheck_abort = 1;
 
 	pbstat = readb(priv->pb_stat);
 	dev_dbg(&priv->input->dev, "pbstat: 0x%x\n", pbstat);
@@ -273,6 +279,32 @@ static int mid_pb_remove(struct platform_device *pdev)
 	return 0;
 }
 
+#ifdef CONFIG_PM
+static int mid_pb_suspend(struct device *dev)
+{
+	struct gpio_keys_drvdata *ddata = dev_get_drvdata(dev);
+	printk("[mid_powerbtn] mid_pb_suspend.\n");
+
+	return 0;
+}
+
+static int mid_pb_suspend_noirq(struct device *dev)
+{
+	if (g_keycheck_abort) {
+		printk("[mid_powerbtn] noirq_check: suspend_abort\n");
+		return -EBUSY;
+	}
+	printk("[mid_powerbtn] mid_pb_suspend_noirq done.\n");
+
+       return 0;
+}
+
+static const struct dev_pm_ops mid_pb_pm_ops = {
+	.suspend	= mid_pb_suspend,
+	.suspend_noirq  = mid_pb_suspend_noirq,
+};
+#endif
+
 static const struct platform_device_id mid_pb_table[] = {
 	{"mid_powerbtn", 1},
 };
@@ -281,6 +313,9 @@ static struct platform_driver mid_pb_driver = {
 	.driver = {
 		.name = DRIVER_NAME,
 		.owner = THIS_MODULE,
+#ifdef CONFIG_PM
+		.pm	= &mid_pb_pm_ops,
+#endif
 	},
 	.probe	= mid_pb_probe,
 	.remove	= mid_pb_remove,

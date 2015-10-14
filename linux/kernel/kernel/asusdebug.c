@@ -31,6 +31,7 @@ char messages[256];
 int first = 0;
 
 char evtlog_bootup_reason[50];
+char evtlog_target_os[32];
 
 extern int nSuspendInProgress;
 static struct workqueue_struct *ASUSEvtlog_workQueue;
@@ -71,8 +72,11 @@ static void do_write_event_worker(struct work_struct *work)
 		}
 		sprintf(buffer,
 			"\n\n---------------System Boot----%s---------\n"
-			"###### Bootup Reason: %s ######\n", ASUS_SW_VER,
-			evtlog_bootup_reason);
+			"###### Bootup Reason: %s ######\n"
+			"###### Target OS: %s     ######\n",
+			ASUS_SW_VER,
+			evtlog_bootup_reason,
+			evtlog_target_os);
 
 		sys_write(g_hfileEvtlog, buffer, strlen(buffer));
 		sys_close(g_hfileEvtlog);
@@ -1116,7 +1120,7 @@ int get_JB_status(void)
 EXPORT_SYMBOL(get_JB_status);
 
 
-static int gKmsgconfig = 0;
+static int gKmsgconfig = 1;
 static int Kmsgconfig_proc_show(struct seq_file *m, void *v)
 {
 	seq_printf(m, "%d", gKmsgconfig);
@@ -1175,12 +1179,16 @@ static const struct file_operations proc_asusevtlog_operations = {
 	.write = asusevtlog_write,
 };
 
+/*
+ * Remove for AT&T
+ *
 static const struct file_operations proc_asusdebug_operations = {
 	.read = asusdebug_read,
 	.write = asusdebug_write,
 	.open = asusdebug_open,
 	.release = asusdebug_release,
 };
+*/
 
 static const struct file_operations proc_JBStatus_operations = {
 	.open = JBStatus_proc_open,
@@ -1196,7 +1204,12 @@ static const struct file_operations proc_kmsgconfig_operations = {
 
 static int __init proc_asusdebug_init(void)
 {
+/*
+ *  Remove for AT&T
+ *
 	proc_create("asusdebug", S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP, NULL, &proc_asusdebug_operations);
+ *
+*/
 	proc_create("asusevtlog", S_IRWXUGO, NULL, &proc_asusevtlog_operations);
 	proc_create("asusevtlog-switch", S_IRWXUGO, NULL,
 		    &proc_evtlogswitch_operations);

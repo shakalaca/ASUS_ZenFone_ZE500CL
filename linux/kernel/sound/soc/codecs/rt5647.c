@@ -58,6 +58,7 @@ int rt5647_HW_ID;
 /* ASUS_BSP Paul +++ */
 int g_is_spk_on;
 extern int g_ringtone_preset_state;
+extern int g_audiostream;
 /* ASUS_BSP Paul --- */
 
 struct rt5647_init_reg {
@@ -898,18 +899,31 @@ void rt5647_update_spk_drc(void)
 	if (g_is_spk_on) {
 		if (rt5647_HW_ID <= HW_ID_ER) {
 			snd_soc_write(rt5647_codec, RT5647_ALC_CTRL_1, 0x490a);
+			snd_soc_write(rt5647_codec, RT5647_ALC_CTRL_2, 0x0000);
+			snd_soc_write(rt5647_codec, RT5647_ALC_CTRL_3, 0x0000);
 			snd_soc_write(rt5647_codec, RT5647_ALC_CTRL_4, 0x4022);
 		} else {
 			if (g_ringtone_preset_state) {
 				snd_soc_write(rt5647_codec, RT5647_ALC_CTRL_1, 0x020c);
+				snd_soc_write(rt5647_codec, RT5647_ALC_CTRL_2, 0x0000);
+				snd_soc_write(rt5647_codec, RT5647_ALC_CTRL_3, 0x0000);
 				snd_soc_write(rt5647_codec, RT5647_ALC_CTRL_4, 0x4000);
+			} else if ((get_audiomode() != 2) && (g_audiostream == 0)) {
+				snd_soc_write(rt5647_codec, RT5647_ALC_CTRL_1, 0x020c);
+				snd_soc_write(rt5647_codec, RT5647_ALC_CTRL_2, 0x1f02);
+				snd_soc_write(rt5647_codec, RT5647_ALC_CTRL_3, 0x000b);
+				snd_soc_write(rt5647_codec, RT5647_ALC_CTRL_4, 0x6000);
 			} else {
 				snd_soc_write(rt5647_codec, RT5647_ALC_CTRL_1, 0x020c);
+				snd_soc_write(rt5647_codec, RT5647_ALC_CTRL_2, 0x0000);
+				snd_soc_write(rt5647_codec, RT5647_ALC_CTRL_3, 0x0000);
 				snd_soc_write(rt5647_codec, RT5647_ALC_CTRL_4, 0x4000);
 			}
 		}
 	} else {
 		snd_soc_write(rt5647_codec, RT5647_ALC_CTRL_1, 0x0000);
+		snd_soc_write(rt5647_codec, RT5647_ALC_CTRL_2, 0x0000);
+		snd_soc_write(rt5647_codec, RT5647_ALC_CTRL_3, 0x0000);
 		snd_soc_write(rt5647_codec, RT5647_ALC_CTRL_4, 0x0000);
 	}
 }
@@ -1308,7 +1322,7 @@ static int set_dmic_clk(struct snd_soc_dapm_widget *w,
 		}
 	}
 #ifdef USE_ASRC
-	idx = 5;
+	idx = 4;
 #endif
 	if (idx < 0)
 		dev_err(codec->dev, "Failed to set DMIC clock\n");
@@ -1316,6 +1330,15 @@ static int set_dmic_clk(struct snd_soc_dapm_widget *w,
 		snd_soc_update_bits(codec, RT5647_DMIC_CTRL1, RT5647_DMIC_CLK_MASK,
 					idx << RT5647_DMIC_CLK_SFT);
 	return idx;
+}
+
+static int rt5647_dmic_delay_event(struct snd_soc_dapm_widget *w,
+	struct snd_kcontrol *kcontrol, int event)
+{
+	/* add delay in here */
+	/* Wait DMIC initial */
+	msleep(50);
+	return 0;
 }
 
 static int check_sysclk1_source(struct snd_soc_dapm_widget *source,
@@ -2558,8 +2581,8 @@ static const struct snd_soc_dapm_widget rt5647_dapm_widgets[] = {
 	SND_SOC_DAPM_SUPPLY_S("ASRC enable", 2, SND_SOC_NOPM, 0, 0,
 		rt5647_asrc_event, SND_SOC_DAPM_POST_PMU |
 		SND_SOC_DAPM_PRE_PMD),
-	SND_SOC_DAPM_SUPPLY("LDO2", RT5647_PWR_MIXER,
-		RT5647_PWR_LDO2_BIT, 0, NULL, 0),
+	SND_SOC_DAPM_SUPPLY("LDO2", SND_SOC_NOPM,
+		0, 0, NULL, 0),
 	SND_SOC_DAPM_SUPPLY("PLL1", RT5647_PWR_ANLG2,
 		RT5647_PWR_PLL_BIT, 0, NULL, 0),
 	SND_SOC_DAPM_SUPPLY("JD Power", SND_SOC_NOPM,
@@ -2601,7 +2624,8 @@ static const struct snd_soc_dapm_widget rt5647_dapm_widgets[] = {
 	SND_SOC_DAPM_SUPPLY("DMIC1 Power", RT5647_DMIC_CTRL1,
 		RT5647_DMIC_1_EN_SFT, 0, NULL, 0),
 	SND_SOC_DAPM_SUPPLY("DMIC2 Power", RT5647_DMIC_CTRL1,
-		RT5647_DMIC_2_EN_SFT, 0, NULL, 0),
+		RT5647_DMIC_2_EN_SFT, 0, rt5647_dmic_delay_event,
+		SND_SOC_DAPM_POST_PMU),
 	/* Boost */
 	SND_SOC_DAPM_PGA("BST1", RT5647_PWR_ANLG2,
 		RT5647_PWR_BST1_BIT, 0, NULL, 0),
@@ -3307,9 +3331,6 @@ static int get_clk_info(int sclk, int rate)
 {
 	int i, pd[] = {1, 2, 3, 4, 6, 8, 12, 16};
 
-#ifdef USE_ASRC
-	return 0;
-#endif
 	if (sclk <= 0 || rate <= 0)
 		return -EINVAL;
 
@@ -3889,7 +3910,7 @@ static int rt5647_set_bias_level(struct snd_soc_codec *codec,
 		snd_soc_write(codec, RT5647_PWR_DIG2, 0x0000);
 		snd_soc_write(codec, RT5647_PWR_VOL, 0x0000);
 		snd_soc_write(codec, RT5647_PWR_MIXER, 0x0000);
-		snd_soc_write(codec, RT5647_PWR_ANLG1, 0x0000);
+		snd_soc_write(codec, RT5647_PWR_ANLG1, RT5647_PWR_MB);
 #ifdef JD1_FUNC
 		snd_soc_write(codec, RT5647_PWR_ANLG2, 0x0004);
 #else
@@ -3993,7 +4014,7 @@ static int rt5647_probe(struct snd_soc_codec *codec)
 	snd_soc_update_bits(codec, RT5647_PWR_ANLG1, RT5647_LDO_SEL_MASK, 0x0);
 
 	/* dc_calibrate(codec); */
-	rt5647_set_bias_level(codec, SND_SOC_BIAS_OFF);
+	rt5647_set_bias_level(codec, SND_SOC_BIAS_STANDBY);
 
 	rt5647->codec = codec;
 	rt5647->combo_jack_en = true; /* enable combo jack */

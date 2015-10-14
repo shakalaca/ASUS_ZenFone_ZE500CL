@@ -27,11 +27,11 @@ static _upi_u16_ new_design_capacity;
 
 #if defined (uG31xx_OS_WINDOWS)
 
-  #define UG31XX_API_VERSION      (_T("UG31XX API $Rev: 660 $"))
+  #define UG31XX_API_VERSION      (_T("UG31XX API $Rev: 684 $"))
 
 #else
 
-  #define UG31XX_API_VERSION      ("UG31XX API $Rev: 660 $")
+  #define UG31XX_API_VERSION      ("UG31XX API $Rev: 684 $")
 
 #endif
 
@@ -647,9 +647,13 @@ void CheckInitCapacityFromCC(struct ug31xx_data *pUg31xx)
 #else   ///< else of WAKEUP_TIME_THRD_1_HOUR
 #define MAX_DELTA_TIME_THRESHOLD_FOR_WAKEUP     (MS_IN_A_DAY)
 #endif  ///< end of WAKEUP_TIME_THRD_1_HOUR
-#define MAX_DELTA_CC_CNT_THRESHOLD_FOR_WAKEUP   (MAX_DELTA_TIME_THRESHOLD_FOR_WAKEUP/125)
+#define MAX_DELTA_CC_CNT_THRESHOLD_FOR_WAKEUP   (MS_IN_A_DAY/24/125)
 #define MAX_DELTA_RSOC_THRESHOLD_FOR_TABLE      (10)
 #define MIN_DELTA_RSOC_THRESHOLD_FOR_TABLE      (-10)
+#define DELTA_SOC_TABLE_IDX_FOR_CC_THRD         (10)
+#define MAX_DELTA_TIME_FOR_WAKEUP               (MS_IN_A_DAY*15)
+#define MAX_DELTA_TIME_CC_FOR_WAKEUP            (MS_IN_A_DAY*2/24/125)
+#define MAX_DELTA_TIME_SOC_TABLE_IDX            (20)
 
 typedef struct RsocChkTableST
 {
@@ -708,17 +712,42 @@ void CmpCapData(struct ug31xx_data *pUg31xx, _upi_bool_ initial)
     }
 
     idx = idx + 1;
-    if((RsocChkTable[idx].maxRsoc == 0) && (RsocChkTable[idx].minRsoc))
+    if((RsocChkTable[idx].maxRsoc == 0) && (RsocChkTable[idx].minRsoc == 0))
     {
       break;
+    }
+  }
+
+  if(CountTotalTime(pUg31xx->sysData.timeTagFromIC) > ((_upi_u32_)MAX_DELTA_TIME_FOR_WAKEUP))
+  {
+    if(pUg31xx->measData.lastCounter > MAX_DELTA_TIME_CC_FOR_WAKEUP)
+    {
+      if(idx < MAX_DELTA_TIME_SOC_TABLE_IDX)
+      {
+        idx = MAX_DELTA_TIME_SOC_TABLE_IDX;
+      }
+    }
+    UG31_LOGE("[%s]: System time over flown %d - %d\n", __func__,
+              pUg31xx->measData.lastCounter,
+              idx);
+  }
+  else
+  {
+    if(pUg31xx->measData.lastCounter > MAX_DELTA_CC_CNT_THRESHOLD_FOR_WAKEUP)
+    {
+      if(idx < DELTA_SOC_TABLE_IDX_FOR_CC_THRD)
+      {
+        idx = DELTA_SOC_TABLE_IDX_FOR_CC_THRD;
+      }
     }
   }
   UG31_LOGE("[%s]: Rsoc threshold = %d ~ %d (%d)\n", __func__,
             RsocChkTable[idx].maxRsoc,
             RsocChkTable[idx].minRsoc,
             RsocChkTable[idx].time);
+	printk("%s: %u, %u\n", __func__, pUg31xx->sysData.rsocFromIC, pUg31xx->capData.rsoc);
 
-  if(pUg31xx->measData.lastCounter > MAX_DELTA_CC_CNT_THRESHOLD_FOR_WAKEUP)
+  if(idx != 0)
   {
     /// [AT-PM] : Check the data accuracy ; 01/27/2013
     deltaQC = (_upi_s16_)pUg31xx->sysData.rsocFromIC;
@@ -1283,7 +1312,6 @@ GGSTATUS upiGG_Initial(char **pObj, GGBX_FILE_HEADER *pGGBXBuf, unsigned char Fo
     pUg31xx->batteryInfo.NAC = (_upi_u16_)pUg31xx->capData.rm;
     pUg31xx->batteryInfo.LMD = (_upi_u16_)pUg31xx->capData.fcc;
     pUg31xx->batteryInfo.RSOC = (_upi_u16_)pUg31xx->capData.rsoc;
-    UpiResetCoulombCounter(&pUg31xx->measData);
     UpiAdcStatus(&pUg31xx->sysData);
     pUg31xx->sysData.cycleCount = (_sys_u16_)pUg31xx->measData.cycleCount;
   }
@@ -1300,7 +1328,10 @@ GGSTATUS upiGG_Initial(char **pObj, GGBX_FILE_HEADER *pGGBXBuf, unsigned char Fo
   pUg31xx->sysData.ccOffset = (_sys_s8_)pUg31xx->measData.ccOffsetAdj;
   pUg31xx->sysData.standbyDsgRatio = (_sys_u8_)pUg31xx->capData.standbyDsgRatio;
   pUg31xx->sysData.voltage = (_sys_u16_)pUg31xx->measData.bat1Voltage;
-  UpiSaveBatInfoTOIC(&pUg31xx->sysData);
+  if(Ug31SaveDataEnable == _UPI_TRUE_)
+  {
+    UpiSaveBatInfoTOIC(&pUg31xx->sysData);
+  }
 
   /// [AT-PM] : Initialize buffer for suspend / resume data ; 11/07/2013
   UpiInitBackupData(&pUg31xx->backupData);
@@ -1502,6 +1533,10 @@ void upiGG_ShellUpdateCC(char *pObj)
   }
   pUg31xx->sysData.voltage = (_sys_u16_)pUg31xx->measData.bat1Voltage;
   pUg31xx->sysData.curr = (_sys_s16_)pUg31xx->measData.curr;
+
+  pUg31xx->sysData.rmFromIC = pUg31xx->batteryInfo.NAC;
+  pUg31xx->sysData.fccFromIC = pUg31xx->batteryInfo.LMD;
+  pUg31xx->sysData.rsocFromIC = (_sys_u8_)pUg31xx->batteryInfo.RSOC;
   UpiUpdateBatInfoFromIC(&pUg31xx->sysData, (_sys_s16_)tmp16, _UPI_FALSE_);
 
   pUg31xx->batteryInfo.NAC = pUg31xx->sysData.rmFromIC;
@@ -4471,6 +4506,8 @@ static _upi_u32_ lkm_last_update_time_tag = 0;
 static _upi_u8_ lkm_polling_init_cnt = 0;
 static _upi_u8_ lkm_decimate_rst_cnt = 0;
 static _upi_u32_ lkm_suspend_time_tag = 0;
+static _upi_u8_ lkm_last_charger_full_rsoc = 0;
+static _upi_u32_ lkm_last_charger_full_time_tag = 0;
 
 #define GGB_VERSION_LENGTH      (4)
 
@@ -5466,6 +5503,7 @@ int lkm_chk_backup_file(void)
 }
 
 #define LKM_SET_CHARGER_FULL_STEP_THRESHOLD (95)
+#define LKM_SET_CHARGER_FULL_TIMEOUT        (300)     /*< [AT-PM] : 5 minutes = 5 x 60 = 300 seconds ; 04/09/2015*/
 
 /**
  * @brief lkm_set_charger_full
@@ -5479,6 +5517,7 @@ int lkm_set_charger_full(char is_full)
 {
   struct ug31xx_data *ug31xx;
   _upi_u8_ soc;
+  _upi_u32_ delta_time;
 
   ug31xx = (struct ug31xx_data *)lkm_gauge;
 
@@ -5516,8 +5555,10 @@ int lkm_set_charger_full(char is_full)
               LKM_SET_CHARGER_FULL_STEP_THRESHOLD,
               ug31xx->batteryInfo.RSOC, 
               ug31xx->measData.extTemperature);
-    return (0);
-  }
+		if (ug31xx->measData.status & 0x00000080) {
+			return 0;
+		}
+	}
   
   UpiSetChargerFull(&ug31xx->capData, _UPI_TRUE_);
   
@@ -5549,6 +5590,29 @@ int lkm_set_charger_full(char is_full)
   ug31xx->batteryInfo.LMD = (_upi_u16_)ug31xx->capData.fcc;
   ug31xx->batteryInfo.RSOC = (_upi_u16_)ug31xx->capData.rsoc;
   UG31_LOGI("[%s]: %d / %d = %d (%d)\n", __func__, ug31xx->batteryInfo.NAC, ug31xx->batteryInfo.LMD, ug31xx->batteryInfo.RSOC, is_full);
+
+  /* [AT-PM] : Force RSOC increased by 1 if timeout ; 04/09/2015*/
+	if (lkm_last_charger_full_time_tag == 0) {
+		lkm_last_charger_full_time_tag = GetSysTickCount();
+		lkm_last_charger_full_rsoc = (_upi_u8_)ug31xx->batteryInfo.RSOC;
+		UG31_LOGE("[%s]: Set lkm_last_charger_full_time_tag = %d\n", __func__, lkm_last_charger_full_time_tag);
+	}
+	delta_time = GetSysTickCount();
+	delta_time = delta_time - lkm_last_charger_full_time_tag;
+	delta_time = delta_time / 1000;
+	UG31_LOGE("[%s]: delta_time = %d second\n", __func__, delta_time);
+	if (delta_time > LKM_SET_CHARGER_FULL_TIMEOUT) {
+		UG31_LOGE("[%s]: charger_full_rsoc = %d != %d\n", __func__, lkm_last_charger_full_rsoc, ug31xx->batteryInfo.RSOC);
+		if (lkm_last_charger_full_rsoc == ug31xx->batteryInfo.RSOC) {
+			if (ug31xx->batteryInfo.RSOC < 100) {
+				upiGG_SetCapacity(lkm_gauge, (_upi_u8_)(ug31xx->batteryInfo.RSOC + 1));
+				UG31_LOGE("[%s]: Set RSOC = %d\n", __func__, ug31xx->batteryInfo.RSOC);
+			}
+		}
+		lkm_last_charger_full_time_tag = GetSysTickCount();
+		lkm_last_charger_full_rsoc = (_upi_u8_)ug31xx->batteryInfo.RSOC;
+	}
+  
   return (0);
 }
 
@@ -6267,6 +6331,23 @@ int lkm_get_voltage_now(void)
 
   upiGG_FetchVoltage(lkm_gauge);
   return (ug31xx->measData.bat1Voltage);
+}
+
+/**
+ * @brief lkm_get_voltage_raw
+ *
+ *  Get raw voltage now
+ *
+ * @return  voltage in mV
+ */
+int lkm_get_voltage_raw(void)
+{
+  struct ug31xx_data *ug31xx;
+
+  ug31xx = (struct ug31xx_data *)lkm_gauge;
+
+  upiGG_FetchVoltage(lkm_gauge);
+  return ((int)RawVolt);
 }
 
 /**
@@ -7033,6 +7114,16 @@ int lkm_update_ggb_file(char *ggb)
   return (0);
 }
 
+int lkm_set_ref_otp_f5(unsigned char value)
+{
+  struct ug31xx_data *ug31xx;
+
+  ug31xx = (struct ug31xx_data *)lkm_gauge;
+
+  ug31xx->measData.status = ug31xx->measData.status | MEAS_STATUS_OTP_CALI_EN;
+  RefOtpF5 = (_meas_u8_)value;
+  return (0);
+}
 struct ug31xx_module_interface ug31_module = {
 	.initial    = lkm_initial,
 	.uninitial  = lkm_uninitial,
@@ -7051,6 +7142,7 @@ struct ug31xx_module_interface ug31_module = {
 
 	.get_voltage                    = lkm_get_voltage,
 	.get_voltage_now                = lkm_get_voltage_now,
+  .get_voltage_raw                = lkm_get_voltage_raw,
 	.get_current                    = lkm_get_current,
 	.get_current_now                = lkm_get_current_now,
 	.get_external_temperature       = lkm_get_external_temperature,
@@ -7117,6 +7209,7 @@ struct ug31xx_module_interface ug31_module = {
 	.set_ggb_config                 = lkm_set_ggb_config,
   .set_cc_chg_offset              = lkm_set_cc_chg_offset,
   .set_capacity_force             = lkm_set_capacity_force,
+  .set_ref_otp_f5                 = lkm_set_ref_otp_f5,
 
 	.chk_backup_file                = lkm_chk_backup_file,
 	.enable_save_data               = lkm_saveDataToIC_switch,

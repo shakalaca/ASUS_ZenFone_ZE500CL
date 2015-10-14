@@ -176,6 +176,7 @@ struct smb345_charger {
 	struct notifier_block    otg_nb;
 	struct work_struct    otg_work;
 	struct delayed_work aicl_dete_work;
+	struct delayed_work smb_probe_work;
 	struct workqueue_struct *chrgr_work_queue;
 	struct list_head    otg_queue;
 	spinlock_t        otg_queue_lock;
@@ -187,7 +188,10 @@ struct smb345_charger {
 };
 
 static bool pad_pwr_supply();
+#ifdef CONFIG_UPI_BATTERY
+struct wake_lock wlock;
 struct wake_lock wlock_t;
+#endif
 
 /* global charger type variable lock */
 DEFINE_MUTEX(g_usb_state_lock);
@@ -316,8 +320,6 @@ static inline int get_battery_status(int *status);
 extern void focal_usb_detection(bool);
 #endif
 
-/* ASUS_BSP Deeo : Add for charger mode LED  */
-extern void set_charger_mode_led();
 
 #if defined(ASUS_FACTORY_BUILD)
 bool eng_charging_limit;
@@ -1199,7 +1201,22 @@ void aicl_dete_worker(struct work_struct *dat)
 	int usb_state;
 	int i;
 	int ret;
-
+	int percentage;
+#ifdef CONFIG_UPI_BATTERY
+	if (smb345_dev) {
+		if (!g_Main_mode) {
+			if (wake_lock_active(&wlock)) {
+				if (!get_battery_rsoc(&percentage)) {
+					if (percentage == 100) {
+						BAT_DBG(" %s: asus_battery_power_wakelock -> wake unlock\n",
+							__func__);
+						wake_unlock(&wlock);
+					}
+				}
+			}
+		}
+	}
+#endif
 	if (!smb345_dev) {
 		pr_err("%s: smb345_dev is null due to driver probed isn't ready\n",
 			__func__);
@@ -1417,6 +1434,7 @@ int setSMB345Charger(int usb_state)
 	int ret = -1;
 	int result = 0;
 	int status = 0;
+	int percentage = -1;
 #ifdef CONFIG_EC_POWER
 	g_pad_cable_state = usb_state;
 	if (is_pad_present()) {
@@ -1434,6 +1452,7 @@ int setSMB345Charger(int usb_state)
 	/*BSP david: update alarm interval*/
 	update_battery_alarm();
 	if (smb345_dev) {
+		cancel_delayed_work_sync(&smb345_dev->smb_probe_work);
 		switch (usb_state) {
 		case USB_IN:
 			power_supply_changed(&smb345_power_supplies[CHARGER_USB-1]);
@@ -1465,8 +1484,6 @@ int setSMB345Charger(int usb_state)
 	case USB_IN:
 		BAT_DBG("%s:USB_IN\n", __func__);
 
-		/* ASUS_BSP Deeo : add for charger mode LED */
-		set_charger_mode_led(1);
 
 		if (smb345_dev) {
 			mutex_lock(&g_usb_state_lock);
@@ -1480,8 +1497,6 @@ int setSMB345Charger(int usb_state)
 	case AC_IN:
 		BAT_DBG("%s: AC_IN\n", __func__);
 
-		/* ASUS_BSP Deeo : add for charger mode LED */
-		set_charger_mode_led(1);
 
 		if (smb345_dev) {
 			mutex_lock(&g_usb_state_lock);
@@ -1492,6 +1507,22 @@ int setSMB345Charger(int usb_state)
 			smb345_update_aicl_work();
 		}
 
+#ifdef CONFIG_UPI_BATTERY
+		if (smb345_dev) {
+			if (!g_Main_mode) {
+				if (!wake_lock_active(&wlock)) {
+					get_battery_rsoc(&percentage);
+					if (percentage != 100) {
+						BAT_DBG(" %s: asus_battery_power_wakelock -> wake lock\n",
+							__func__);
+
+						wake_lock(&wlock);
+					}
+				}
+			}
+		}
+#endif
+
 #ifdef CONFIG_TOUCHSCREEN_FT3X17
 		focal_usb_detection(true);
 #endif
@@ -1500,8 +1531,26 @@ int setSMB345Charger(int usb_state)
 	case CABLE_OUT:
 		BAT_DBG("%s: CABLE_OUT\n", __func__);
 
-		/* ASUS_BSP Deeo : add for charger mode LED */
-		set_charger_mode_led(0);
+
+		if (smb345_dev) {
+#ifdef CONFIG_UPI_BATTERY
+			if (!g_Main_mode) {
+				if (wake_lock_active(&wlock)) {
+					BAT_DBG(" %s: asus_battery_power_wakelock -> wake unlock\n",
+						__func__);
+
+					/* timeout value as same as the
+					<charger.exe>\asus_global.h
+					#define ASUS_UNPLUGGED_SHUTDOWN_TIME(3 sec)
+					*/
+					wake_lock_timeout(&wlock_t, 3*HZ);
+					wake_unlock(&wlock);
+				} else {
+					wake_lock_timeout(&wlock_t, 3*HZ);
+				}
+			}
+#endif
+		}
 
 #ifdef CONFIG_TOUCHSCREEN_FT3X17
 		focal_usb_detection(false);
@@ -1516,7 +1565,7 @@ int setSMB345Charger(int usb_state)
 		BAT_DBG("%s: DISABLE_5V\n", __func__);
 		result = otg(0);
 		break;
-case UNKNOWN_IN:
+	case UNKNOWN_IN:
 		BAT_DBG("%s: UNKNOWN_IN\n", __func__);
 
 		if (smb345_dev) {
@@ -1527,6 +1576,21 @@ case UNKNOWN_IN:
 			/*BSP david : do JEITA*/
 			smb345_update_aicl_work();
 		}
+#ifdef CONFIG_UPI_BATTERY
+		if (smb345_dev) {
+			if (!g_Main_mode) {
+				if (!wake_lock_active(&wlock)) {
+					get_battery_rsoc(&percentage);
+					if (percentage != 100) {
+						BAT_DBG(" %s: asus_battery_power_wakelock -> wake lock\n",
+							__func__);
+
+						wake_lock(&wlock);
+					}
+				}
+			}
+		}
+#endif
 		break;
 	default:
 		BAT_DBG(" ERROR: wrong usb state value = %d\n", usb_state);
@@ -1542,10 +1606,9 @@ EXPORT_SYMBOL(setSMB345Charger);
 int smb345_charging_toggle(charging_toggle_level_t level, bool on)
 {
 	int ret = 0;
-	int old_toggle;
 	int result_toggle;
-	bool reject = false;
-	static charging_toggle_level_t old_lvl = JEITA;
+	static int disabled;
+	int reason;
 	char *level_str[] = {
 		"BALANCE",
 		"JEITA",
@@ -1557,56 +1620,20 @@ int smb345_charging_toggle(charging_toggle_level_t level, bool on)
 			"due to probe function has error\n");
 		return 1;
 	}
-
-	mutex_lock(&g_charging_toggle_lock);
-	old_toggle = g_charging_toggle;
-	mutex_unlock(&g_charging_toggle_lock);
-
-	result_toggle = on;
-	/* do charging or not? */
-	if (level != FLAGS) {
-		if (on) {
-			/* want to start charging? */
-			if (level == JEITA) {
-				if (!old_toggle) {
-					/* want to restart charging? */
-					if (old_lvl != JEITA) {
-						/* reject the request! someone stop charging before */
-						result_toggle = false;
-						reject = true;
-					}
-				}
-			} else if (level == BALANCE) {
-				if (!old_toggle) {
-					/* want to restart charging? */
-					if (old_lvl != BALANCE) {
-						/* reject the request! someone stop charging before */
-						result_toggle = false;
-						reject = true;
-					}
-				}
-			} else {
-				/* what the hell are you? */
-			}
-		} else {
-			/* want to stop charging? just do it! */
-		}
-	} else {
-		/* it's the highest level. just do it! */
+	reason = BIT(level);
+	if (on == false) {
+		disabled |= reason;
+	} else{
+		disabled &= ~reason;
 	}
+	result_toggle = !disabled;
 
-	BAT_DBG("%s: old_lvl:%s, request_lv:%s, old_toggle:%s, request_toggle:%s, result:%s\n",
+	BAT_DBG("%s: current_flag: %d request_lv:%s, request_toggle:%s, result:%s\n",
 		__func__,
-		level_str[old_lvl],
+		disabled,
 		level_str[level],
-		old_toggle ? "ON" : "OFF",
 		on ? "ON" : "OFF",
 		result_toggle ? "ON" : "OFF");
-
-	/* level value assignment */
-	if (!reject) {
-		old_lvl = level;
-	}
 
 	ret = smb345_set_writable(smb345_dev, true);
 	if (ret < 0)
@@ -2524,6 +2551,27 @@ static int smb345_routine_aicl_control(struct smb345_charger *smb)
 
 	return 0;
 }
+extern bool g_upi_probe_done;
+void smb_probe_worker(struct work_struct *dat)
+{
+	int charger_type;
+	BAT_DBG("%s++\n", __func__);
+	if (smb345_dev) {
+		if (g_upi_probe_done) {
+			mutex_lock(&g_usb_state_lock);
+			charger_type = g_usb_state;
+			dev_warn(&smb345_dev->client->dev,
+					"%s: config current when probe\n", __func__);
+			smb345_config_max_current(charger_type);
+			mutex_unlock(&g_usb_state_lock);
+			smb345_update_aicl_work();
+		} else{
+			schedule_delayed_work(&smb345_dev->smb_probe_work, HZ);
+		}
+	} else{
+		BAT_DBG_E("%s: charger initial fail!\n", __func__);
+	}
+}
 static int smb345_probe(struct i2c_client *client,
 		const struct i2c_device_id *id)
 {
@@ -2552,14 +2600,34 @@ static int smb345_probe(struct i2c_client *client,
 	smb->client = client;
 	smb->pdata = pdata;
 
-	if (!g_Main_mode) {
-		BAT_DBG(" %s: in charger mode!\n", __func__);
-	}
+#ifdef CONFIG_UPI_BATTERY
 	/* init wake lock in COS */
-	wake_lock_init(&wlock_t,
-		WAKE_LOCK_SUSPEND,
-		"asus_battery_power_wakelock_timeout");
+	if (!g_Main_mode) {
+		BAT_DBG(" %s: wake lock init: asus_battery_power_wakelock\n",
+			__func__);
+		wake_lock_init(&wlock,
+			WAKE_LOCK_SUSPEND,
+			"asus_battery_power_wakelock");
+		wake_lock_init(&wlock_t,
+			WAKE_LOCK_SUSPEND,
+			"asus_battery_power_wakelock_timeout");
+
+		/* prevent system from entering s3 in COS
+		    while AC charger is connected
+		*/
+		charger_type = g_usb_state;
+
+		if (charger_type == AC_IN || charger_type == UNKNOWN_IN) {
+			if (!wake_lock_active(&wlock)) {
+				BAT_DBG(" %s: asus_battery_power_wakelock "
+					"-> wake lock\n", __func__);
+				wake_lock(&wlock);
+			}
+		}
+	}
+#endif
 	smb345_routine_aicl_control(smb);
+	INIT_DELAYED_WORK(&smb->smb_probe_work, smb_probe_worker);
 	smb345_dev = smb;
 	smb345_dump_registers(NULL);
 
@@ -2625,14 +2693,16 @@ static int smb345_probe(struct i2c_client *client,
 	   Vbus is legal (a valid input voltage
 	   is present)
 	*/
+
+	verifyFW();
 	mutex_lock(&g_usb_state_lock);
 	charger_type = g_usb_state;
-	verifyFW();
-	dev_warn(&smb345_dev->client->dev,
-			"%s: config current when probe\n", __func__);
-	smb345_config_max_current(charger_type);
 	mutex_unlock(&g_usb_state_lock);
-	smb345_update_aicl_work();
+	if (charger_type == AC_IN || charger_type == USB_IN || charger_type == PAD_SUPPLY || charger_type == UNKNOWN_IN) {
+		dev_warn(&smb345_dev->client->dev,
+				"%s: start probe work: charger type = %d\n", __func__, charger_type);
+		schedule_delayed_work(&smb->smb_probe_work, 0);
+	}
 	generate_key();
 	printk("[Progress][smb358] Probe ends\n");
 	return 0;
@@ -2648,7 +2718,12 @@ static int smb345_remove(struct i2c_client *client)
 	smb->running = false;
 
 	wake_lock_destroy(&smb->wakelock);
-	wake_lock_destroy(&wlock_t);
+#ifdef CONFIG_UPI_BATTERY
+	if (!g_Main_mode) {
+		wake_lock_destroy(&wlock);
+		wake_lock_destroy(&wlock_t);
+	}
+#endif
 	pm_runtime_get_noresume(&smb->client->dev);
 
 	return 0;
@@ -2703,9 +2778,6 @@ static void smb345_complete(struct device *dev)
 {
 	struct smb345_charger *smb = dev_get_drvdata(dev);
 
-	if (!g_Main_mode) {
-		wake_lock_timeout(&wlock_t, 3*HZ);
-	}
 	dev_info(&smb->client->dev, "smb345 resume\n");
 }
 #else

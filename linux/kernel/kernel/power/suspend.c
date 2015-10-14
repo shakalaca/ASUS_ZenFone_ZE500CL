@@ -205,6 +205,7 @@ static int suspend_test(int level)
 	return 0;
 }
 
+extern int g_keycheck_abort;
 /**
  * suspend_prepare - Prepare for entering system sleep state.
  *
@@ -225,6 +226,7 @@ static int suspend_prepare(suspend_state_t state)
 	if (error)
 		goto Finish;
 
+	g_keycheck_abort = 0;
 	error = suspend_freeze_processes();
 	if (!error)
 		return 0;

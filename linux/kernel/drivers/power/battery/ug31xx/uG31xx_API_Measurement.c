@@ -36,6 +36,10 @@
 #endif  ///< end of MEAS_FAKE_INT_TEMP
 
 MeasDataType *ptrMeasData = _UPI_NULL_;
+_meas_u8_ RefOtpF5 = 0x80;
+_meas_u16_ RawVolt = 0;
+
+static unsigned char RegF5Value;
 
 typedef struct MeasDataInternalST {
 
@@ -579,6 +583,9 @@ void CalibrateChargeCode(MeasDataInternalType *obj)
 #define ADC2_VOLTAGE_100MV    (3000)                                    ///< [AT-PM] : Unit in mV ; 01/25/2013
 #define ADC2_VOLTAGE_200MV    (4000)                                    ///< [AT-PM] : Unit in mV ; 01/25/2013
 #define ADC2_VOLTAGE_DELTA    (ADC2_VOLTAGE_200MV - ADC2_VOLTAGE_100MV)
+#define BGRTUNE_STEP_RATIO    (2)
+#define BGRTUNE_STEP_BASE     (3)                                       ///< [AT-PM] : Vref per BGRTUNE = STEP_RATIO / STEP_BASE ; 04/06/2015
+#define BGRTUNE_BASE          (1000)                                    ///< [AT-PM] : Vref x 4 at initial BGRTUNE ; 04/06/2015
 
 /**
  * @brief ConvertBat1
@@ -605,6 +612,18 @@ void ConvertBat1(MeasDataInternalType *obj)
   /// [AT-PM] : Apply calibration parameter ; 01/25/2013
   tmp32 = tmp32 - ptrCellParameter->adc2_offset;
   tmp32 = tmp32*CALIBRATION_FACTOR_CONST/ptrCellParameter->adc2_gain;
+  RawVolt = (_meas_u16_)tmp32;
+
+  /// [AT-PM] : OTP calibration ; 04/05/2015
+  if((obj->info->status & MEAS_STATUS_OTP_CALI_EN) & 
+     ((RegF5Value & BGRTUNE_5_0) != (RefOtpF5 & BGRTUNE_5_0)))
+  {
+    tmp32 = tmp32 * ((RegF5Value & BGRTUNE_5_0) - (RefOtpF5 & BGRTUNE_5_0));
+    tmp32 = tmp32 * BGRTUNE_STEP_RATIO;
+    tmp32 = tmp32 / BGRTUNE_STEP_BASE;
+    tmp32 = tmp32 / BGRTUNE_BASE;
+    tmp32 = tmp32 + RawVolt;
+  }
   obj->info->bat1Voltage = (_meas_u16_)tmp32;
 }
 
@@ -1345,6 +1364,12 @@ void ReadRegister(MeasDataInternalType *obj)
                REG_CELL_EN, 
                1, 
                (unsigned char *)&obj->reg9E);
+  API_I2C_Read(SEURITY_REGISTER, 
+               UG31XX_I2C_HIGH_SPEED_MODE, 
+               UG31XX_I2C_TEM_BITS_MODE, 
+               OTP3_BYTE2, 
+               1, 
+               (unsigned char *)&RegF5Value);
   
   if(obj->reg9E >= APPLICATION_UG3102)
   {
@@ -2231,7 +2256,7 @@ MEAS_RTN_CODE UpiMeasurement(MeasDataType *data, MEAS_SEL_CODE select)
   rtn = FetchAdcCode(obj);
   if((select == MEAS_SEL_ALL) || (select == MEAS_SEL_INITIAL))
   {
-  UG31_LOGE("[%s]: (%d-%d) V=%d, I=%d, IT=%d, ET=%d, CH=%d, CT=%d, %02x%02x %02x%02x%02x%02x %02x%02x%02x %02x%02x %02x%02x %02x%02x\n", __func__, 
+  UG31_LOGE("[%s]: (%d-%d) V=%d, I=%d, IT=%d, ET=%d, CH=%d, CT=%d, %02x%02x %02x%02x%02x%02x %02x%02x%02x %02x%02x %02x%02x %02x%02x %02x%02x %04x\n", __func__, 
               select, obj->info->fetchRetryCnt, obj->codeBat1, obj->codeCurrent, 
               obj->codeIntTemperature, obj->codeExtTemperature, obj->codeCharge, obj->codeCounter,
               obj->reg14, obj->reg9C,
@@ -2239,11 +2264,13 @@ MEAS_RTN_CODE UpiMeasurement(MeasDataType *data, MEAS_SEL_CODE select)
               obj->regC9, obj->regCA, obj->regCB,
               obj->reg0A, obj->reg0B,
               obj->reg50, obj->reg51,
-              obj->reg9B, obj->reg9E);
+              obj->reg9B, obj->reg9E,
+              RegF5Value, RefOtpF5,
+              obj->info->status);
   }
   else
   {
-  UG31_LOGI("[%s]: (%d-%d) V=%d, I=%d, IT=%d, ET=%d, CH=%d, CT=%d, %02x%02x %02x%02x%02x%02x %02x%02x%02x %02x%02x %02x%02x %02x%02x\n", __func__, 
+  UG31_LOGI("[%s]: (%d-%d) V=%d, I=%d, IT=%d, ET=%d, CH=%d, CT=%d, %02x%02x %02x%02x%02x%02x %02x%02x%02x %02x%02x %02x%02x %02x%02x %02x%02x %04x\n", __func__, 
               select, obj->info->fetchRetryCnt, obj->codeBat1, obj->codeCurrent, 
               obj->codeIntTemperature, obj->codeExtTemperature, obj->codeCharge, obj->codeCounter,
               obj->reg14, obj->reg9C,
@@ -2251,7 +2278,9 @@ MEAS_RTN_CODE UpiMeasurement(MeasDataType *data, MEAS_SEL_CODE select)
               obj->regC9, obj->regCA, obj->regCB,
               obj->reg0A, obj->reg0B,
               obj->reg50, obj->reg51,
-              obj->reg9B, obj->reg9E);
+              obj->reg9B, obj->reg9E,
+              RegF5Value, RefOtpF5,
+              obj->info->status);
   }
   if(rtn != MEAS_RTN_PASS)
   {
@@ -2446,8 +2475,8 @@ MEAS_RTN_CODE UpiMeasurement(MeasDataType *data, MEAS_SEL_CODE select)
     }
   }
 
-  UG31_LOGI("[%s]: %d mV / %d mA / %d 0.1oC / %d 0.1oC / %d mAh\n", __func__,
-            data->bat1Voltage, data->curr, data->intTemperature, data->extTemperature, data->deltaCap);
+  UG31_LOGI("[%s]: %d (%d) mV / %d mA / %d 0.1oC / %d 0.1oC / %d mAh\n", __func__,
+            data->bat1Voltage, RawVolt, data->curr, data->intTemperature, data->extTemperature, data->deltaCap);
   #ifdef  UG31XX_SHELL_ALGORITHM
     upi_free(obj);
   #endif  ///< end of UG31XX_SHELL_ALGORITHM

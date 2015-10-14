@@ -536,9 +536,6 @@ static int asus_battery_update_capacity_level(int percentage)
 
 	return -EINVAL;
 }
-
-/* ASUS_BSP Deeo : Add for charger mode LED  */
-extern void set_charger_mode_led();
 static int asus_battery_update_status_no_mutex(int percentage)
 {
 	int status;
@@ -584,7 +581,6 @@ static int asus_battery_update_status_no_mutex(int percentage)
 				tmp_batt_info.tbl_chgr->charging_toggle)
 				tmp_batt_info.tbl_chgr->charging_toggle(JEITA, true);
 		if (percentage == 100) {
-			set_charger_mode_led(2);
 			status = POWER_SUPPLY_STATUS_FULL;
 		}
 	} else {

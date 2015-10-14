@@ -27,6 +27,7 @@ typedef char              _meas_bool_;
 #define MEAS_STATUS_REFER_ET                  (1<<4)
 #define MEAS_STATUS_CABLE_OUT                 (1<<5)
 #define MEAS_STATUS_LAST_IN_SUSPEND_MODE      (1<<6)
+#define MEAS_STATUS_OTP_CALI_EN               (1<<7)
 
 #define MEAS_IN_SUSPEND_MODE(x)           ((x & MEAS_STATUS_IN_SUSPEND_MODE) ? _UPI_TRUE_ : _UPI_FALSE_)
 #define MEAS_REVERSE_CURRENT_DIRECTION(x) ((x & MEAS_STATUS_REVERSE_CURRENT_DIRECTION) ? _UPI_TRUE_ : _UPI_FALSE_)
@@ -155,6 +156,8 @@ typedef struct MeasDataST {
 } ALIGNED_ATTRIBUTE MeasDataType;
 
 extern MeasDataType *ptrMeasData;
+extern _meas_u8_ RefOtpF5;
+extern _meas_u16_ RawVolt;
 
 /**
  * @brief UpiResetCoulombCounter

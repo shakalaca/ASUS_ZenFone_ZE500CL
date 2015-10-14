@@ -73,11 +73,13 @@ typedef enum {
 #define UG31XX_KOBJ_CMD3      (1<<6)
 #define UG31XX_KOBJ_CMD4      (1<<7)
 #define UG31XX_KOBJ_CMD5      (1<<8)
-#define UG31XX_KOBJ_CMD6      (1<<9)
-#define UG31XX_KOBJ_CMD7      (1<<10)
-#define UG31XX_KOBJ_CMD8      (1<<11)
-#define UG31XX_KOBJ_CMD9      (1<<12)
-#define UG31XX_KOBJ_CMDA      (1<<13)
+#define UG31XX_KOBJ_CMD5A     (1<<9)
+#define UG31XX_KOBJ_CMD6      (1<<10)
+#define UG31XX_KOBJ_CMD6A     (1<<11)
+#define UG31XX_KOBJ_CMD7      (1<<12)
+#define UG31XX_KOBJ_CMD8      (1<<13)
+#define UG31XX_KOBJ_CMD9      (1<<14)
+#define UG31XX_KOBJ_CMDA      (1<<15)
 
 struct ug31xx_module_interface {
 	int (*initial)(char *ggb, unsigned char cable);
@@ -97,6 +99,7 @@ struct ug31xx_module_interface {
   
 	int (*get_voltage)(void);
 	int (*get_voltage_now)(void);
+  int (*get_voltage_raw)(void);
 	int (*get_current)(void);
 	int (*get_current_now)(void);
 	int (*get_external_temperature)(void);
@@ -163,6 +166,7 @@ struct ug31xx_module_interface {
 	int (*set_ggb_config)(unsigned int config);
   int (*set_cc_chg_offset)(unsigned int offset_25, unsigned int offset_50, unsigned int offset_75, unsigned int offset_100);
   int (*set_capacity_force)(int rsoc);
+  int (*set_ref_otp_f5)(unsigned char value);
 
 	int (*chk_backup_file)(void);
 	int (*enable_save_data)(char enable);

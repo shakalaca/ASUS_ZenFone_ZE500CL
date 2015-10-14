@@ -53,6 +53,7 @@ int rhb_HW_ID;
 #include <linux/switch.h>
 static struct switch_dev *ringtone_preset_sdev;
 int g_ringtone_preset_state;
+int g_audiostream;
 /* ASUS_BSP Paul --- */
 
 /* As per the codec spec the mic2_sdet debounce delay is 20ms.
@@ -578,9 +579,10 @@ long switch_ctrl_ioctl(struct file *file_ptr,
 			(void __user *)arg, sizeof(lstream)))
 			return -EFAULT;
 
-		stream = lstream;
+		g_audiostream = lstream;
+		rt5647_update_spk_drc();
 
-		pr_debug("%s : AUDIO STREAM status %d %d\n", __func__, lstream, stream);
+		pr_debug("%s : AUDIO STREAM status %d\n", __func__, g_audiostream);
 
 #if 0
 		if (stream == 2) {		/* AudioSystem::RING == 2 */
@@ -638,13 +640,6 @@ int get_audiomode(void)
 	return audio_mode;
 }
 EXPORT_SYMBOL(get_audiomode);
-
-int get_audiostream(void)
-{
-	pr_debug("%s() : Audio Stream %d\n", __func__, stream);
-	return stream;
-}
-EXPORT_SYMBOL(get_audiostream);
 
 static const struct file_operations switch_ctrl_fops = {
 	.owner = THIS_MODULE,
@@ -798,6 +793,7 @@ int ctp_init(struct snd_soc_pcm_runtime *runtime)
 		printk("Failed to register switch ringtone_preset\n");
 
 	g_ringtone_preset_state = 0;
+	g_audiostream = -1;
 	/* ASUS_BSP Paul --- */
 
 	return ret;

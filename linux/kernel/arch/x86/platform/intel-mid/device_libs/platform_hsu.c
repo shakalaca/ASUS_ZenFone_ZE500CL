@@ -29,6 +29,7 @@
 #define VLV_HSU_CLOCK	0x0800
 #define VLV_HSU_RESET	0x0804
 #define VLV_HSU_OVF_IRQ	0x0820	/* Overflow interrupt related */
+extern bool g_Main_mode;/*ASUS-BBSP Skip configure in charger mode+*/
 
 static unsigned int clock;
 static int hsu_device_cfg = config_base;
@@ -823,6 +824,11 @@ void intel_mid_hsu_rts(int port, int value)
 
 	if (!info->rts_gpio)
 		return;
+
+	/*ASUS-BBSP Skip configure in charger mode+++*/
+	if (!g_Main_mode)
+		return;
+	/*ASUS-BBSP Skip configure in charger mode---*/
 
 	if (value) {
 		gpio_direction_output(info->rts_gpio, 1);

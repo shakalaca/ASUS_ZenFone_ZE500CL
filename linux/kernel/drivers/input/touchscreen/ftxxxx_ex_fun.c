@@ -56,6 +56,7 @@ extern u8 FTS_gesture_register_d5;
 extern u8 FTS_gesture_register_d6;
 extern u8 FTS_gesture_register_d7;
 
+extern bool EnableProximityCheck;
 static bool fw_update_complete;
 static int fw_update_progress;
 static int fw_update_total_count = 100;
@@ -909,6 +910,32 @@ static ssize_t switch_gesture_mode_show(struct device *dev, struct device_attrib
 	else
 		return sprintf(buf, "%x \n", ftxxxx_ts->gesture_mode_type);
 
+}
+
+static ssize_t enable_proximity_check_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
+{
+	int tmp = 0;
+
+	tmp = buf[0] - 48;
+
+	if (tmp == 0) {
+
+		EnableProximityCheck = false;
+		printk("[Focal][Touch] DisableProximityCheck ! \n");
+	} else if (tmp == 1) {
+
+		EnableProximityCheck = true;
+		printk("[Focal][Touch] EnableProximityCheck ! \n");
+	}
+
+	return count;
+
+}
+
+static ssize_t enable_proximity_check_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+
+	return sprintf(buf, "%d \n", EnableProximityCheck);
 }
 
 static ssize_t ftxxxx_init_show(struct device *dev, struct device_attribute *attr, char *buf)
@@ -1852,6 +1879,7 @@ static DEVICE_ATTR(glove_mode, Focal_RW_ATTR, switch_glove_mode_show, switch_glo
 static DEVICE_ATTR(dclick_mode, Focal_RW_ATTR, switch_dclick_mode_show, switch_dclick_mode_store);
 static DEVICE_ATTR(gesture_mode, Focal_RW_ATTR, switch_gesture_mode_show, switch_gesture_mode_store);
 static DEVICE_ATTR(HW_ID, Focal_RW_ATTR, asus_get_hwid_show, NULL);
+static DEVICE_ATTR(Enable_Proximyty_Check, Focal_RW_ATTR, enable_proximity_check_show, enable_proximity_check_store);
 
 /*add your attr in here*/
 static struct attribute *ftxxxx_attributes[] = {
@@ -1874,6 +1902,7 @@ static struct attribute *ftxxxx_attributes[] = {
 	&dev_attr_gesture_mode.attr,
 	&dev_attr_HW_ID.attr,
 	&dev_attr_dclick_mode.attr,
+	&dev_attr_Enable_Proximyty_Check.attr,
 	NULL
 };
 

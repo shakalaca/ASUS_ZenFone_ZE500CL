@@ -105,7 +105,25 @@ static void check_backup_file_routine(void);
 #define UG31XX_KBO_PASS_MAX             (40)
 #define UG31XX_KBO_PASS_MIN             (-40)
 #define UG31XX_KBO_WAKE_LOCK_TIMEOUT    (10)
+#define UG31XX_USER_SPACE_RESPONSE_CNT  (10)
 #define REPORT_CAPACITY_POLLING_TIME (180)
+#define UG31XX_KBO_VOLT_TARGET          (4000)
+#define UG31XX_KBO_VOLT_PASS_RANGE      (1)     ///< [AT-PM] : +/- 1% ; 04/05/2015
+#define UG31XX_KBO_OTP_RETRY            (5)
+#define UG31XX_KBO_OTP_70_SIZE          (4)
+#define UG31XX_KBO_OTP_E0_SIZE          (4)
+#define UG31XX_KBO_OTP_F0_SIZE          (16)
+#define UG31XX_CHARGER_FULL_T_UPB       (450)
+#define UG31XX_CHARGER_FULL_T_LWB       (100)
+
+typedef struct ug31xx_kbo_volt_st {
+  unsigned short volt;
+  unsigned short volt_upb;
+  unsigned short volt_lwb;
+  unsigned char otp_70[UG31XX_KBO_OTP_70_SIZE];
+  unsigned char otp_e0[UG31XX_KBO_OTP_E0_SIZE];
+  unsigned char otp_f0[UG31XX_KBO_OTP_F0_SIZE];
+} ug31xx_kbo_volt_type;
 
 struct ug31xx_gauge {
 #if defined(CONFIG_HAS_EARLYSUSPEND) && defined(UG31XX_EARLY_SUSPEND)
@@ -159,6 +177,8 @@ struct ug31xx_gauge {
 	int daemon_uevent_count;
 	int force_fc_time; 
   struct hrtimer kbo_timer;
+
+  ug31xx_kbo_volt_type kbo_volt;
 };
 
 static void batt_info_update_work_func(struct work_struct *work);
@@ -227,6 +247,8 @@ static void batt_info_update_work_func(struct work_struct *work);
 #define UG31XX_IOCTL_RESET_TOTALLY      	    _IO(UG31XX_IOC_MAGIC, 50)
 #define UG31XX_IOCTL_DAEMON_EVENT             _IOWR(UG31XX_IOC_MAGIC, 51, unsigned char *)
 #define UG31XX_IOCTL_DAEMON_GGB_FILE_CONTENT  _IOWR(UG31XX_IOC_MAGIC, 52, unsigned char *)
+#define UG31XX_IOCTL_KBO_VOLT_RESULT          _IOWR(UG31XX_IOC_MAGIC, 53, unsigned char *)
+#define UG31XX_IOCTL_KBO_VOLT_UPDATE          _IOWR(UG31XX_IOC_MAGIC, 54, unsigned char *)
 
 #define UG31XX_IOCTL_CMD(cmd)         (((_IOC_DIR(cmd)) << 16) | (_IOC_NR(cmd)))
 
@@ -303,6 +325,7 @@ static bool probe_with_cable = false;
 static bool in_early_suspend = false;
 static int delta_q_in_suspend = 0;
 static bool user_space_algorithm_response = true;
+static int user_space_algorithm_response_cnt;
 static int user_space_algorithm_prev_fc_sts = 0;
 static int user_space_algorithm_now_fc_sts = 0;
 static bool user_space_in_progress = false;
@@ -340,6 +363,9 @@ static unsigned char *ioctl_data_trans_ptr = NULL;
 static unsigned char ioctl_data_trans_buf[UG31XX_IOCTL_TRANS_DATA_SIZE];
 static int kbo_pass_cnt = 0;
 static int kbo_fail_cnt = 0;
+static unsigned int kbo_volt_target = UG31XX_KBO_VOLT_TARGET;
+static unsigned int kbo_volt_pass_range = UG31XX_KBO_VOLT_PASS_RANGE;
+static bool kbo_volt_update = false;
 static int op_actions = UG31XX_OP_NORMAL;
 static int force_fc_current_thrd = 0;
 static int force_fc_timeout = 0;
@@ -419,6 +445,12 @@ static bool is_charging_full(void)
   charger_status = smb345_get_charging_status();
   if (charger_status == POWER_SUPPLY_STATUS_FULL)
   {
+    if((ug31->batt_avg_temp >= UG31XX_CHARGER_FULL_T_UPB) ||
+       (ug31->batt_avg_temp < UG31XX_CHARGER_FULL_T_LWB))
+    {
+      GAUGE_notice("[%s]: No full (%d)\n", __func__, ug31->batt_temp);
+      return (false);
+    }
     GAUGE_notice("[%s]: full.\n", __func__);
     return (true);
   }
@@ -1057,6 +1089,7 @@ static long ug31xx_misc_ioctl(struct file *file, unsigned int cmd, unsigned long
 		schedule_delayed_work(&ug31->batt_info_update_work, 0*HZ);
 		break;
 	case (UG31XX_IOCTL_CMD(UG31XX_IOCTL_DAEMON_EVENT)):
+		mutex_lock(&ug31->info_update_lock);
 		val[0] = (unsigned char)(daemon_uevent_request % 256);
 		val[1] = (unsigned char)(daemon_uevent_request / 256);
 		if (copy_to_user((void __user *)arg, (void *)&val[0], 2)) {
@@ -1064,6 +1097,7 @@ static long ug31xx_misc_ioctl(struct file *file, unsigned int cmd, unsigned long
 			UG31_LOGE("[%s] copy_to_user fail\n", __func__);
 	}
 	daemon_uevent_request = 0;
+	mutex_unlock(&ug31->info_update_lock);
 	break;
 
 	case (UG31XX_IOCTL_CMD(UG31XX_IOCTL_DAEMON_GGB_FILE_CONTENT)):
@@ -1080,6 +1114,36 @@ static long ug31xx_misc_ioctl(struct file *file, unsigned int cmd, unsigned long
 		}
 	#endif  ///< end of UG31XX_DYNAMIC_UPDATE_GGB
 		break;
+
+  case (UG31XX_IOCTL_CMD(UG31XX_IOCTL_KBO_VOLT_RESULT)):
+ 		UG31_LOGE("[%s] cmd -> UG31XX_IOCTL_KBO_VOLT_RESULT\n", __func__);
+    if(copy_to_user((void __user *)arg, (void *)&ug31->kbo_volt, sizeof(ug31->kbo_volt)))
+    {
+      rc = -EINVAL;
+      UG31_LOGE("[%s] copy_to_user fail\n", __func__);
+    }
+    break;
+
+  case (UG31XX_IOCTL_CMD(UG31XX_IOCTL_KBO_VOLT_UPDATE)):
+ 		UG31_LOGE("[%s] cmd -> UG31XX_IOCTL_KBO_VOLT_UPDATE\n", __func__);
+    if(copy_from_user((void *)&ug31->kbo_volt, (void __user *)arg, sizeof(ug31->kbo_volt)))
+    {
+      rc = -EINVAL;
+      UG31_LOGE("[%s] copy_from_user fail\n", __func__);
+    }
+    kbo_volt_update = true;
+    UG31_LOGE("[%s] %4d %4d %4d-%02x %02x %02x %02x-%02x %02x %02x %02x-%02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x\n", __func__,
+            ug31->kbo_volt.volt, ug31->kbo_volt.volt_upb, ug31->kbo_volt.volt_lwb,
+            ug31->kbo_volt.otp_70[0], ug31->kbo_volt.otp_70[1], ug31->kbo_volt.otp_70[2], ug31->kbo_volt.otp_70[3],
+            ug31->kbo_volt.otp_e0[0], ug31->kbo_volt.otp_e0[1], ug31->kbo_volt.otp_e0[2], ug31->kbo_volt.otp_e0[3],
+            ug31->kbo_volt.otp_f0[0], ug31->kbo_volt.otp_f0[1], ug31->kbo_volt.otp_f0[2], ug31->kbo_volt.otp_f0[3],
+            ug31->kbo_volt.otp_f0[4], ug31->kbo_volt.otp_f0[5], ug31->kbo_volt.otp_f0[6], ug31->kbo_volt.otp_f0[7],
+            ug31->kbo_volt.otp_f0[8], ug31->kbo_volt.otp_f0[9], ug31->kbo_volt.otp_f0[10], ug31->kbo_volt.otp_f0[11],
+            ug31->kbo_volt.otp_f0[12], ug31->kbo_volt.otp_f0[13], ug31->kbo_volt.otp_f0[14], ug31->kbo_volt.otp_f0[15]);
+    mutex_lock(&ug31->info_update_lock); 
+    ug31_module.set_ref_otp_f5(ug31->kbo_volt.otp_f0[5]);
+    mutex_unlock(&ug31->info_update_lock);
+    break;
 
     default:
       UG31_LOGE("[%s] invalid cmd %d\n", __func__, _IOC_NR(cmd));
@@ -1164,7 +1228,9 @@ enum UG31XX_KOBJ_ENV {
 #ifdef FEATRUE_K_BOARD_OFFSET
   UG31XX_KOBJ_ENV_BACKUP_BO_CHECK,
   UG31XX_KOBJ_ENV_BACKUP_BO_WRITE,
+  UG31XX_KOBJ_ENV_BACKUP_BO_WRITE_VOLT,
   UG31XX_KOBJ_ENV_BACKUP_BO_INIT,
+  UG31XX_KOBJ_ENV_BACKUP_BO_INIT_VOLT,
   UG31XX_KOBJ_ENV_BACKUP_BO_AUTO_CHECK,
 #endif /*< for FEATRUE_K_BOARD_OFFSET*/
 #ifdef  UG31XX_DYNAMIC_UPDATE_GGB
@@ -1188,7 +1254,9 @@ static void change_ug31xx_kobj(void)
   char *cmd3[] = {"OP_NAME=backup_data", "OP_ACTION=write", NULL};
   char *cmd4[] = {"OP_NAME=backup_bo", "OP_ACTION=check", NULL};
   char *cmd5[] = {"OP_NAME=backup_bo", "OP_ACTION=write", NULL};
+  char *cmd5a[] = {"OP_NAME=backup_bo", "OP_ACTION=write_volt", NULL};
   char *cmd6[] = {"OP_NAME=backup_bo", "OP_ACTION=init", NULL};
+  char *cmd6a[] = {"OP_NAME=backup_bo", "OP_ACTION=init_volt", NULL};
 #ifdef FEATRUE_K_BOARD_OFFSET
   char *cmd7[] = {"OP_NAME=backup_bo", "OP_ACTION=check_auto", NULL};
 #endif /*< for FEATRUE_K_BOARD_OFFSET*/
@@ -1271,9 +1339,17 @@ static void change_ug31xx_kobj(void)
 		kobject_uevent_env(&ug31_kobj->kobj, KOBJ_CHANGE, cmd5);
 		daemon_uevent_request = daemon_uevent_request | UG31XX_KOBJ_CMD5;
       break;      
+    case UG31XX_KOBJ_ENV_BACKUP_BO_WRITE_VOLT:
+      kobject_uevent_env(&ug31_kobj->kobj, KOBJ_CHANGE, cmd5a);
+      daemon_uevent_request = daemon_uevent_request | UG31XX_KOBJ_CMD5A;
+      break;      
     case UG31XX_KOBJ_ENV_BACKUP_BO_INIT:
 		kobject_uevent_env(&ug31_kobj->kobj, KOBJ_CHANGE, cmd6);
 		daemon_uevent_request = daemon_uevent_request | UG31XX_KOBJ_CMD6;
+      break;      
+    case UG31XX_KOBJ_ENV_BACKUP_BO_INIT_VOLT:
+      kobject_uevent_env(&ug31_kobj->kobj, KOBJ_CHANGE, cmd6a);
+      daemon_uevent_request = daemon_uevent_request | UG31XX_KOBJ_CMD6A;
       break;      
 #ifdef FEATRUE_K_BOARD_OFFSET
     case UG31XX_KOBJ_ENV_BACKUP_BO_AUTO_CHECK:
@@ -1519,6 +1595,8 @@ static void check_backup_file_routine(void)
 #define MIN_CURRENT_DB      (-5)
 int g_fakeBattTemperature = -999;
 int g_fakePhoneCapacity = -1;
+bool g_cap_updated;
+extern void set_charger_mode_led();
 static int ug31xx_update_psp(enum power_supply_property psp,
 			     union power_supply_propval *val)
 {
@@ -1616,6 +1694,19 @@ static int ug31xx_update_psp(enum power_supply_property psp,
 			}
 		} else{
 			ug31->batt_status = POWER_SUPPLY_STATUS_DISCHARGING;
+		}
+		if (g_cap_updated) {
+			switch (ug31->batt_status) {
+			case POWER_SUPPLY_STATUS_FULL:
+				set_charger_mode_led(2);
+				break;
+			case POWER_SUPPLY_STATUS_CHARGING:
+				set_charger_mode_led(1);
+				break;
+			default:
+				set_charger_mode_led(0);
+				break;
+			}
 		}
 
 		val->intval = ug31->batt_status;
@@ -1957,8 +2048,6 @@ static void show_abnormal_batt_status_for_retry(void)
 		ug31->batt_cycle_count);
 }
 
-/* ASUS_BSP Deeo : Add for charger mode LED  */
-extern void set_charger_mode_led();
 struct timespec g_batLFullDetectAlarm_time;
 static void asus_print_all(void)
 {
@@ -2020,7 +2109,6 @@ static void asus_print_all(void)
 	if (cableType == AC_IN || cableType == USB_IN || cableType == UNKNOWN_IN) {
 		if (ug31->batt_capacity_shifted == 100) {
 			ug31->batt_status = POWER_SUPPLY_STATUS_FULL;
-			set_charger_mode_led(2); /*ASUS_BSP Deeo : support charger mode LED*/
 		} else if (get_sw_charging_toggle()) {
 			ug31->batt_status = POWER_SUPPLY_STATUS_CHARGING;
 		} else{
@@ -2126,7 +2214,6 @@ static void show_update_batt_status(void)
 	int fakeBattTemperature;
 	fakePhoneCapacity = g_fakePhoneCapacity;
 	fakeBattTemperature = g_fakeBattTemperature;
-
 	ug31->batt_capacity_last	= ug31->batt_capacity;
 	ug31->batt_current_last	= ug31->batt_current;
 
@@ -2198,7 +2285,7 @@ static void show_update_batt_status(void)
 	{
 		enable_board_offset_cali_at_eoc = true;
 	}
-
+	g_cap_updated = true;
 }
 
 static void adjust_cell_table(void)
@@ -2398,6 +2485,21 @@ static void batt_info_update_work_func(struct work_struct *work)
 	}
 	wake_lock_timeout(&ug31_dev->batt_wake_lock, UG31XX_WAKE_LOCK_TIMEOUT*HZ);
 
+	mutex_lock(&ug31->info_update_lock);
+	if ((user_space_algorithm_response == false) &&
+		(daemon_uevent_request & UG31XX_KOBJ_CMD1A)) {
+		user_space_algorithm_response_cnt = user_space_algorithm_response_cnt + 1;
+		if (user_space_algorithm_response_cnt > UG31XX_USER_SPACE_RESPONSE_CNT) {
+			user_space_algorithm_response_cnt = UG31XX_USER_SPACE_RESPONSE_CNT;
+		} else{
+      /*[AT-PM] : Start batt_info_update_work_func until all daemon uevent is serviced ; 04/09/2015*/
+			schedule_delayed_work(&ug31_dev->batt_info_update_work, 1*HZ);
+			mutex_unlock(&ug31->info_update_lock); 
+			return;
+		}
+	}
+	mutex_unlock(&ug31->info_update_lock); 
+
 	curr_charger_full_status = is_charging_full();
 
 	if(curr_charger_full_status == true)
@@ -2539,6 +2641,7 @@ static void batt_info_update_work_func(struct work_struct *work)
 	if(ug31_module.get_decimate_rst_sts() == UG31XX_DECIMATE_RST_NOT_ACTIVE)
 	{
 		user_space_algorithm_response = false;
+		user_space_algorithm_response_cnt = 0;
 		op_actions = UG31XX_OP_NORMAL;
 		kobj_event_env = UG31XX_KOBJ_ENV_UPDATE_CAPACITY;
 		change_ug31xx_kobj();
@@ -2646,6 +2749,27 @@ EXPORT_SYMBOL(ug31xx_set_charge_termination_current);
 #endif  ///< end of UG31XX_DYNAMIC_TAPER_CURRENT
 
 #ifdef UG31XX_PROC_DEV
+unsigned char read_otp_value(unsigned char addr)
+{
+  unsigned char value;
+  int rtn;
+  int retry;
+
+  retry = UG31XX_KBO_OTP_RETRY;
+  value = 0;
+  while(retry)
+  {
+    rtn = ug31_module.ug31xx_i2c_read(addr, &value);
+    if(rtn == 0)
+    {
+      break;
+    }
+
+    retry = retry - 1;
+  }
+  UG31_LOGE("[%s]: OTP[%02x] = %02x (%d)\n", __func__, addr, value, retry);
+  return (value);
+}
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3, 10, 0)
 int ug31xx_get_proc_rsoc(char *buf, char **start, off_t off, int count, 
                          int *eof, void *data )
@@ -2767,7 +2891,6 @@ int ug31xx_get_proc_kbo_stop(char *buf, char **start, off_t off, int count, int 
 	len += sprintf(buf + len, "Stop board offset calibration.\n");
 	return (len);
 }
-
 int ug31xx_get_ggb_update(char *buf, char **start, off_t off, int count, int *eof, void *data)
 {
 	int len;
@@ -2778,6 +2901,93 @@ int ug31xx_get_ggb_update(char *buf, char **start, off_t off, int count, int *eo
 
 	len = 0;
 	len += sprintf(buf + len, "Request updating ggb file\n");
+	return (len);
+}
+
+
+int ug31xx_get_proc_kbo_volt(char *buf, char **start, off_t off, int count, int *eof, void *data)
+{
+	int len;
+  int idx;
+  unsigned short range;
+  bool pass;
+
+	len = 0;
+
+  range = (unsigned short)kbo_volt_target;
+  range = range * kbo_volt_pass_range / 100;
+
+  ug31->kbo_volt.volt_upb = (unsigned short)kbo_volt_target;
+  ug31->kbo_volt.volt_lwb = (unsigned short)kbo_volt_target;
+  ug31->kbo_volt.volt_upb = ug31->kbo_volt.volt_upb + range;
+  ug31->kbo_volt.volt_lwb = ug31->kbo_volt.volt_lwb - range;
+  UG31_LOGE("[%s]: Voltage Range = %d : %d\n", __func__, ug31->kbo_volt.volt_upb, ug31->kbo_volt.volt_lwb);
+
+  mutex_lock(&ug31->info_update_lock);
+  stop_charging();
+  msleep(2000);
+  ug31->kbo_volt.volt = (unsigned short)ug31_module.get_voltage_raw();
+  start_charging();
+  if((ug31->kbo_volt.volt < ug31->kbo_volt.volt_upb) && 
+     (ug31->kbo_volt.volt > ug31->kbo_volt.volt_lwb))
+  {
+    len += sprintf(buf + len, "PASS - ");
+    pass = true;
+  }
+  else
+  {
+    len += sprintf(buf + len, "FAIL - ");
+    pass = false;
+  }
+  len += sprintf(buf + len, "%d : ", ug31->kbo_volt.volt);
+
+  idx = 0;
+  while(1)
+  {
+    ug31->kbo_volt.otp_70[idx] = read_otp_value(0x70 + idx);
+    len += sprintf(buf + len, "%02x ", ug31->kbo_volt.otp_70[idx]);
+
+    idx = idx + 1;
+    if(idx >= UG31XX_KBO_OTP_E0_SIZE)
+    {
+      break;
+    }
+  }
+
+  idx = 0;
+  while(1)
+  {
+    ug31->kbo_volt.otp_e0[idx] = read_otp_value(0xe0 + idx);
+    len += sprintf(buf + len, "%02x ", ug31->kbo_volt.otp_e0[idx]);
+
+    idx = idx + 1;
+    if(idx >= UG31XX_KBO_OTP_E0_SIZE)
+    {
+      break;
+    }
+  }
+
+  idx = 0;
+  while(1)
+  {
+    ug31->kbo_volt.otp_f0[idx] = read_otp_value(0xf0 + idx);
+    len += sprintf(buf + len, "%02x ", ug31->kbo_volt.otp_f0[idx]);
+
+    idx = idx + 1;
+    if(idx >= UG31XX_KBO_OTP_F0_SIZE)
+    {
+      break;
+    }
+  }
+  mutex_unlock(&ug31->info_update_lock);
+
+  if(pass == true)
+  {
+    kobj_event_env = UG31XX_KOBJ_ENV_BACKUP_BO_WRITE_VOLT; 
+    change_ug31xx_kobj();
+  }
+
+	len += sprintf(buf + len, "\n");
 	return (len);
 }
 #else
@@ -2924,6 +3134,97 @@ int ug31xx_get_ggb_update(struct seq_file *m, void *v)
 static int ug31xx_get_ggb_update_open(struct inode *inode, struct file *file)
 {
 	return single_open(file, ug31xx_get_ggb_update, NULL);
+}
+static int ug31xx_get_proc_kbo_volt(struct seq_file *m, void *v)
+{
+	int len;
+  int idx;
+  char buf[1024];
+  unsigned short range;
+  bool pass;
+
+	len = 0;
+  memset(buf, 0, 1024);
+
+  range = (unsigned short)kbo_volt_target;
+  range = range * kbo_volt_pass_range / 100;
+
+  ug31->kbo_volt.volt_upb = (unsigned short)kbo_volt_target;
+  ug31->kbo_volt.volt_lwb = (unsigned short)kbo_volt_target;
+  ug31->kbo_volt.volt_upb = ug31->kbo_volt.volt_upb + range;
+  ug31->kbo_volt.volt_lwb = ug31->kbo_volt.volt_lwb - range;
+  UG31_LOGE("[%s]: Voltage Range = %d : %d\n", __func__, ug31->kbo_volt.volt_upb, ug31->kbo_volt.volt_lwb);
+
+  mutex_lock(&ug31->info_update_lock);
+  stop_charging();
+  msleep(2000);
+  ug31->kbo_volt.volt = ug31_module.get_voltage_raw();
+  start_charging();
+  if((ug31->kbo_volt.volt < ug31->kbo_volt.volt_upb) && 
+     (ug31->kbo_volt.volt > ug31->kbo_volt.volt_lwb))
+  {
+    len += sprintf(buf + len, "PASS - ");
+    pass = true;
+  }
+  else
+  {
+    len += sprintf(buf + len, "FAIL - ");
+    pass = false;
+  }
+  len += sprintf(buf + len, "%d : ", ug31->kbo_volt.volt);
+
+  idx = 0;
+  while(1)
+  {
+    ug31->kbo_volt.otp_70[idx] = read_otp_value(0x70 + idx);
+    len += sprintf(buf + len, "%02x ", ug31->kbo_volt.otp_70[idx]);
+
+    idx = idx + 1;
+    if(idx >= UG31XX_KBO_OTP_E0_SIZE)
+    {
+      break;
+    }
+  }
+
+  idx = 0;
+  while(1)
+  {
+    ug31->kbo_volt.otp_e0[idx] = read_otp_value(0xe0 + idx);
+    len += sprintf(buf + len, "%02x ", ug31->kbo_volt.otp_e0[idx]);
+
+    idx = idx + 1;
+    if(idx >= UG31XX_KBO_OTP_E0_SIZE)
+    {
+      break;
+    }
+  }
+
+  idx = 0;
+  while(1)
+  {
+    ug31->kbo_volt.otp_f0[idx] = read_otp_value(0xf0 + idx);
+    len += sprintf(buf + len, "%02x ", ug31->kbo_volt.otp_f0[idx]);
+
+    idx = idx + 1;
+    if(idx >= UG31XX_KBO_OTP_F0_SIZE)
+    {
+      break;
+    }
+  }
+  mutex_unlock(&ug31->info_update_lock);
+
+  if(pass == true)
+  {
+    kobj_event_env = UG31XX_KOBJ_ENV_BACKUP_BO_WRITE_VOLT; 
+    change_ug31xx_kobj();
+  }
+
+  seq_printf(m, "%s\n", buf);
+  return 0;
+}
+static int ug31xx_get_proc_kbo_volt_open(struct inode *inode, struct file *file)
+{
+    return single_open(file, ug31xx_get_proc_kbo_volt, NULL);
 }
 #endif
 #endif  ///< end of UG31XX_PROC_DEV
@@ -3378,6 +3679,9 @@ static void kbo_check_work_func(struct work_struct *work)
 	}
   else
   {
+    kobj_event_env = UG31XX_KOBJ_ENV_BACKUP_BO_INIT_VOLT;
+    change_ug31xx_kobj();
+
     kobj_event_env = UG31XX_KOBJ_ENV_BACKUP_BO_INIT;
   }
   change_ug31xx_kobj();
@@ -3536,24 +3840,30 @@ void BatTriggeredSetRTC(struct work_struct *dat)
 	cableType = get_charger_type();
 
 	if (cableType == AC_IN || cableType == USB_IN || cableType == UNKNOWN_IN) {
-		if (soc <= 85 || soc == 100) {
+		/*100*/
+		if (soc == 100) {
 			RTCSetInterval = 1800;
+		/*0~90*/
 		} else if (soc <= 90) {
-			RTCSetInterval = 1500;
+			RTCSetInterval = 1200;
+		/*91~95*/
 		} else if (soc <= 95) {
 			RTCSetInterval = 600;
+		/*96~99*/
 		} else{
 			RTCSetInterval = 180;
 		}
 	} else{
 		if (soc <= 1) {
-			RTCSetInterval = 450;
-		} else if (soc <= 2) {
-			RTCSetInterval = 900;
-		} else if (soc <= 3) {
-			RTCSetInterval = 1350;
+			RTCSetInterval = 300;
 		} else{
-			RTCSetInterval = 1800;
+			RTCSetInterval = soc * 450;
+			if (RTCSetInterval < 450) {
+				RTCSetInterval = 450;
+			}
+			if (RTCSetInterval > 36000) {
+				RTCSetInterval = 36000;
+			}
 		}
 	}
 
@@ -3563,6 +3873,7 @@ void BatTriggeredSetRTC(struct work_struct *dat)
 		timespec_to_ktime(g_batLFullDetectAlarm_time));
 	spin_unlock_irqrestore(&bat_alarm_slock, batfullflags);
 }
+bool g_upi_probe_done;
 static void batt_probe_work_func(struct work_struct *work)
 {
 	int rtn;
@@ -3903,6 +4214,18 @@ static void batt_probe_work_func(struct work_struct *work)
 	if (!ent) {
 		GAUGE_err("create /proc/update_ggb fail\n");
 	}
+    static const struct file_operations ug31xx_get_proc_kbo_volt_fops = {
+        .owner = THIS_MODULE,
+        .open = ug31xx_get_proc_kbo_volt_open,
+        .read = seq_read,
+        .write = ug31xx_proc_write,
+        .llseek = seq_lseek,
+        .release = single_release,
+    };
+    ent = proc_create("kbo_volt", 0744, NULL, &ug31xx_get_proc_kbo_volt_fops);
+    if (!ent) {
+        GAUGE_err("create /proc/kbo_volt fail\n");
+    }
 #endif    ///< end of LINUX_VERSION_CODE < KERNEL_VERSION(3, 10, 0)
 #endif	///< end of UG31XX_PROC_DEV
 
@@ -4003,6 +4326,7 @@ static void batt_probe_work_func(struct work_struct *work)
 
 	force_power_supply_change = true;
 	start_charging();	
+	g_upi_probe_done = true;
 	GAUGE_info("[%s] Driver %s registered done\n", __func__, ug31->client->name);
 	printk("[Progress][ug31xx] WQ ends\n");
 	return;
@@ -4853,3 +5177,8 @@ module_param(cali_rsoc_time, int, 0644);
 MODULE_PARM_DESC(cali_rsoc_time, "Set time threshold for calibrating rsoc");
 module_param(manual_update_ggb, int, 0644);
 MODULE_PARM_DESC(manual_update_ggb, "Set 1 to request to update GGB from file");
+module_param(kbo_volt_target, uint, 0644);
+MODULE_PARM_DESC(kbo_volt_target, "Set target voltage for kbo_volt");
+module_param(kbo_volt_pass_range, uint, 0644);
+MODULE_PARM_DESC(kbo_volt_pass_range, "Set pass range of kbo_volt in %");
+

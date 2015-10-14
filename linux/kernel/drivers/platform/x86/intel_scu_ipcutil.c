@@ -126,6 +126,7 @@
 #define OSHOB_RESERVED_SIZE      184    /* Reserved                          */
 
 extern char evtlog_bootup_reason[50];
+extern char evtlog_target_os[32];
 
 struct chip_reset_event {
 	int id;
@@ -1320,7 +1321,7 @@ EXPORT_SYMBOL_GPL(intel_scu_ipc_write_osnib_rr);
  */
 int intel_scu_ipc_read_osnib_rr(u8 *rr)
 {
-	pr_debug("intel_scu_ipc_read_osnib_rr: read reboot reason\n");
+	pr_info("intel_scu_ipc_read_osnib_rr: read reboot reason\n");
 	return oshob_info->scu_ipc_read_osnib(
 			rr,
 			1,
@@ -3008,6 +3009,7 @@ static int oshob_init(void)
 				(int)((wd & OSNIB_WDOG_COUNTER_MASK)
 					>> OSNIB_WDOG_COUNTER_SHIFT),
 				alarm);
+			snprintf(evtlog_target_os, sizeof(evtlog_target_os), "%s", osnib_target_oses[i].target_os_name);
 			rr_found++;
 			break;
 		}
