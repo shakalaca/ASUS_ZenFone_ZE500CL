@@ -1423,6 +1423,7 @@ static enum power_supply_property ug31xx_batt_props[] = {
 	POWER_SUPPLY_PROP_CHARGE_FULL,
 	POWER_SUPPLY_PROP_CHARGE_COUNTER,
 	POWER_SUPPLY_PROP_SERIAL_NUMBER,
+	POWER_SUPPLY_PROP_TECHNOLOGY,
 };
 
 #endif	///< end of UG31XX_REGISTER_POWERSUPPLY
@@ -1490,6 +1491,9 @@ static int ug31xx_battery_get_property(struct power_supply *psy,
 		break;
 	case POWER_SUPPLY_PROP_PRESENT:
 		val->intval = 1;
+		break;
+	case POWER_SUPPLY_PROP_TECHNOLOGY:
+		val->intval = POWER_SUPPLY_TECHNOLOGY_LION;
 		break;
 	case POWER_SUPPLY_PROP_STATUS:
 	case POWER_SUPPLY_PROP_VOLTAGE_NOW:
@@ -1609,7 +1613,6 @@ static int ug31xx_update_psp(enum power_supply_property psp,
 		GAUGE_err("[%s] Gauge driver not init finish\n", __func__);
 		return -EINVAL;
 	}
-
 	if(psp == POWER_SUPPLY_PROP_TEMP)
 	{
 		val->intval = ug31->batt_temp;
