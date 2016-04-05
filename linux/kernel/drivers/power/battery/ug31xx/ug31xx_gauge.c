@@ -4468,6 +4468,70 @@ void static create_fakePhoneCapacity_proc_file(void)
 	}
 }
 /*---BSP David fake phone capacity set proc---*/
+/*+++ASUS_BSP David BATT Monitor command Interface+++*/
+#define battery_soh_PROC_FILE	"driver/battery_soh"
+static struct proc_dir_entry *battery_soh_proc_file;
+static int battery_soh_proc_read(struct seq_file *buf, void *v)
+{
+	char battInfo[256] = "";
+	if (ug31) {
+		seq_printf(buf, "FCC=%d(mAh),DC=%d(mAh),RM=%d(mAh),TEMP=%d(C),VOLT=%d(mV),CUR=%d(mA),CC=%d\n",
+			ug31->batt_charge_full,
+			ug31_module.get_design_capacity(),
+			ug31->batt_charge_now,
+			ug31->batt_temp / 10,
+			ug31->batt_volt,
+			ug31->batt_current,
+			ug31->batt_cycle_count);
+	} else{
+		seq_printf(buf, "FAIL\n");
+	}
+	return 0;
+}
+
+static int battery_soh_proc_open(struct inode *inode, struct  file *file)
+{
+	return single_open(file, battery_soh_proc_read, NULL);
+}
+static ssize_t battery_soh_proc_write(struct file *filp, const char __user *buff,
+		unsigned long len, void *data)
+{
+	int val;
+
+	char messages[256];
+
+	if (len > 256) {
+		len = 256;
+	}
+
+	if (copy_from_user(messages, buff, len)) {
+		return -EFAULT;
+	}
+
+	val = (int)simple_strtol(messages, NULL, 10);
+
+	printk("[BAT][GAUGE][Proc]gaugeIC Proc File: %d\n", val);
+
+	return len;
+}
+
+static const struct file_operations battery_soh_fops = {
+	.owner = THIS_MODULE,
+	.open = battery_soh_proc_open,
+	.write = battery_soh_proc_write,
+	.read = seq_read,
+};
+void static create_battery_soh_proc_file(void)
+{
+	battery_soh_proc_file = proc_create(battery_soh_PROC_FILE, 0644, NULL, &battery_soh_fops);
+
+	if (battery_soh_proc_file) {
+		printk("[BAT][GAUGE][Proc]proc file create sucessed!\n");
+	} else{
+		printk("[BAT][GAUGE][Proc]proc file create failed!\n");
+	}
+}
+/*---ASUS_BSP David BATT Monitor command Interface---*/
 /*+++ASUS_BSP David BMMI Adb Interface+++*/
 #define	gaugeIC_status_PROC_FILE	"driver/gaugeIC_status"
 static struct proc_dir_entry *gaugeIC_status_proc_file;
@@ -4584,6 +4648,7 @@ static int ug31xx_i2c_probe(struct i2c_client *client,
 	INIT_DELAYED_WORK(&ug31->request_ggb_update_work, request_ggb_update_work_func);
 #endif  /*< end of UG31XX_DYNAMIC_UPDATE_GGB*/
 	create_gaugeIC_status_proc_file();
+	create_battery_soh_proc_file();
 	create_fakePhoneCapacity_proc_file();
 	create_fakeBattTemperature_proc_file();
 

@@ -817,14 +817,15 @@ static int gpio_keys_probe(struct platform_device *pdev)
 		bdata->ddata = ddata;
 		error = gpio_keys_setup_key(pdev, input, bdata, button);
 
-		printk("[Progress][Gpio_keys] Probe wakeup %d\n", i);  /*aa*/
-
 		if (error)
 			goto fail2;
 
 		if (button->wakeup)
 			wakeup = 1;
 	}
+
+	wake_lock_init(&pwr_key_wake_lock, WAKE_LOCK_SUSPEND, "pwr_key_lock");
+	printk(KERN_INFO "[Gpio_keys]Initialize a wakelock for gpio_key\r\n");
 
 	error = sysfs_create_group(&pdev->dev.kobj, &gpio_keys_attr_group);
 	if (error) {
@@ -839,19 +840,7 @@ static int gpio_keys_probe(struct platform_device *pdev)
 			error);
 		goto fail3;
 	}
-
-	/* get current state of buttons that are connected to GPIOs */
-	for (i = 0; i < pdata->nbuttons; i++) {
-		struct gpio_button_data *bdata = &ddata->data[i];
-		if (gpio_is_valid(bdata->button->gpio))
-			gpio_keys_gpio_report_event(bdata);
-	}
-	input_sync(input);
-
 	device_init_wakeup(&pdev->dev, wakeup);
-
-	wake_lock_init(&pwr_key_wake_lock, WAKE_LOCK_SUSPEND, "pwr_key_lock");
-	printk(KERN_INFO "[Gpio_keys]Initialize a wakelock for gpio_key\r\n");
 
 	printk("[Progress][Gpio_keys] Probe ends\n");
 	return 0;

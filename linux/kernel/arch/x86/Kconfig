@@ -2440,6 +2440,10 @@ config ZE500CL
 	bool "ASUS ZE500CL Product"
 	depends on X86_MDFLD
 
+config ANDROID_BINDER_IPC_32BIT
+	bool "ANDROID_BINDER_IPC_32BIT for Intel Houdini 5.0.4"
+	depends on X86_MDFLD
+
 source "net/Kconfig"
 
 source "drivers/Kconfig"
